@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, lazy, Suspense } from 'react'
 import { RefreshCw, ExternalLink, Loader2, BookmarkPlus } from 'lucide-react'
 import TitleBar from './components/TitleBar'
 import ExportPanel from './components/ExportPanel'
@@ -253,15 +253,16 @@ function App() {
     return () => { try { stop?.() } catch (_) { /* ignore */ } }
   }, [MCP_ACTION_BRIDGE_VERSION])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previousTab = mainTabRef.current
     mainTabRef.current = mainTab
-    if (previousTab === 'editor' && mainTab !== 'editor') {
+    if ((previousTab === 'editor' || previousTab === 'export') && previousTab !== mainTab) {
       try {
         useTimelineStore.getState().shuttlePause?.()
         videoCache.clear()
       } catch (_) {
-        // Best-effort release of hidden editor media resources.
+        // Run before the newly visible preview's passive effects acquire
+        // decoders; clearing later could dispose its freshly mounted media.
       }
     }
   }, [mainTab])
@@ -840,7 +841,7 @@ function App() {
           className="flex-1 flex flex-col min-h-0 overflow-hidden bg-sf-dark-950"
           style={{ display: mainTab === 'export' ? 'flex' : 'none' }}
         >
-          <ExportPanel />
+          <ExportPanel active={mainTab === 'export'} />
         </div>
         {mainTab === "stock" && (
           <WorkspaceErrorBoundary>

@@ -41,6 +41,7 @@ function EffectsPanel() {
     getMaxTransitionDuration,
     getMaxEdgeTransitionDuration,
     addEffect,
+    applyMultiClipEffectsEdit,
   } = useTimelineStore()
   
   const [tab, setTab] = useState('transitions') // 'transitions' | 'effects'
@@ -241,6 +242,11 @@ function EffectsPanel() {
   }
 
   const applyEffect = (effectTypeId, presetId = null) => {
+    const liveState = useTimelineStore.getState()
+    if (liveState.clips.some((clip) => liveState.selectedClipIds.includes(clip.id) && clip.type === 'compound')) {
+      setMessage('Open Contents to add effects to clips inside this compound. Effects cannot be added to the parent compound.')
+      return
+    }
     const def = getEffectTypeDefinition(effectTypeId)
     if (!def) return
     if (selectedClips.length === 0) {
@@ -251,16 +257,21 @@ function EffectsPanel() {
     const settings = preset
       ? { ...def.defaults, ...preset.settings }
       : { ...def.defaults }
-    selectedClips.forEach((clip) => {
-      addEffect(clip.id, { type: effectTypeId, settings })
-    })
+    let changedCount = selectedClips.length
+    if (selectedClips.length > 1) {
+      const result = applyMultiClipEffectsEdit({ clipIds: selectedClipIds, action: 'add', type: effectTypeId, settings })
+      if (!result.ok) { setMessage(result.error); return }
+      changedCount = result.changedCount
+    } else {
+      addEffect(selectedClips[0].id, { type: effectTypeId, settings })
+    }
     const effectLabel = getEffectLabel(def)
     const presetSuffix = preset
       ? t('effectsPanel.messages.presetSuffix', { preset: getPresetLabel(def, preset) })
       : ''
     setMessage(t(
-      selectedClips.length === 1 ? 'effectsPanel.messages.effectAddedOne' : 'effectsPanel.messages.effectAddedMany',
-      { effect: effectLabel, preset: presetSuffix, count: selectedClips.length }
+      changedCount === 1 ? 'effectsPanel.messages.effectAddedOne' : 'effectsPanel.messages.effectAddedMany',
+      { effect: effectLabel, preset: presetSuffix, count: changedCount }
     ))
   }
   
@@ -413,7 +424,7 @@ function EffectsPanel() {
           </div>
 
           {message && (
-            <div className="text-[11px] text-sf-accent bg-sf-accent/10 border border-sf-accent/20 rounded-lg p-2">
+            <div role="status" data-testid="effects-panel-status" className="text-[11px] text-sf-accent bg-sf-accent/10 border border-sf-accent/20 rounded-lg p-2">
               {message}
             </div>
           )}

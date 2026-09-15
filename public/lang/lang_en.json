@@ -178,6 +178,185 @@
     }
   },
   "export": {
+    "readiness": {
+      "checking": "Checking…",
+      "stale": "Refresh needed",
+      "warningCount": "{{count}} warnings",
+      "optional": "Optional",
+      "title": "Before you export",
+      "help": "Check source availability, Optical Flow cache metadata, and possible picture or audio gaps in this range. Warnings are advisory; intentional black and silence are allowed.",
+      "refresh": "Refresh checks",
+      "check": "Check this range",
+      "cancel": "Cancel check",
+      "staleHelp": "The timeline, source records, or export settings changed. Refresh to check the current range.",
+      "failed": "The check could not finish. Try again; no media or project data was changed.",
+      "noWarnings": "No warnings found by these checks.",
+      "warnings": "Export readiness warnings",
+      "inspect": "Inspect",
+      "limitations": "Availability and timeline checks only—not a decode or render test. Source changes and cache fingerprints are validated during export. Refresh after moving files; export safety checks still apply.",
+      "warning": {
+        "invalid-range": {
+          "title": "Choose an export range",
+          "detail": "The selected range has no duration."
+        },
+        "missing-asset": {
+          "title": "Media record is missing",
+          "detail": "“{{name}}” refers to media that is no longer in this project."
+        },
+        "missing-location": {
+          "title": "Media location is missing",
+          "detail": "“{{name}}” has no recorded file location or media URL."
+        },
+        "media-unverified": {
+          "title": "Some media could not be checked",
+          "detail": "File availability could not be checked for “{{name}}”. Browser or remote media needs export validation."
+        },
+        "missing-source": {
+          "title": "Source file is unavailable",
+          "detail": "The recorded source for “{{name}}” was not found or is inaccessible. Relink it in the Editor if needed."
+        },
+        "missing-proxy-source": {
+          "title": "Original source file is unavailable",
+          "detail": "The original for “{{name}}” was not found or is inaccessible. A review proxy may still be available; verify the original before final delivery."
+        },
+        "missing-mask": {
+          "title": "Mask media is unavailable",
+          "detail": "A mask file used by “{{name}}” was not found or is inaccessible."
+        },
+        "optical-unready": {
+          "title": "Optical Flow needs attention",
+          "detail": "The cache for “{{name}}” is unavailable or no longer covers this edit. Review Optical Flow in the Inspector."
+        },
+        "optical-path": {
+          "title": "Optical Flow location is invalid",
+          "detail": "The cache for “{{name}}” does not have a supported project-relative location. Rebuild it in the Inspector."
+        },
+        "optical-unsaved": {
+          "title": "Optical Flow needs a saved project",
+          "detail": "Save the project and review the cache for “{{name}}” in the Inspector."
+        },
+        "optical-signature": {
+          "title": "Optical Flow source is unverified",
+          "detail": "The cache for “{{name}}” has no source fingerprint. Export will require a valid cache built from the current source."
+        },
+        "missing-optical": {
+          "title": "Optical Flow file is unavailable",
+          "detail": "The cache file for “{{name}}” was not found or is inaccessible. Rebuild it in the Inspector."
+        },
+        "file-unverified": {
+          "title": "File availability could not be checked",
+          "detail": "The recorded file for “{{name}}” could not be checked. No media has been changed."
+        },
+        "picture-gap": {
+          "title": "Possible picture gap",
+          "detail": "No active picture clip covers this interval. Black or transparency may be intentional."
+        },
+        "picture-tail": {
+          "title": "Possible blank ending",
+          "detail": "No active picture clip covers the end of this export range. Black or transparency may be intentional."
+        },
+        "no-audio": {
+          "title": "No active audio clips in this range",
+          "detail": "Audio is requested, but no enabled, audible audio clips were found. Silence may be intentional."
+        },
+        "master-muted": {
+          "title": "Master audio is muted",
+          "detail": "The master volume is zero. Audio is requested, but the output will be silent."
+        },
+        "compound-unverified": {
+          "title": "Compound could not be checked",
+          "detail": "“{{name}}” has unsupported compound contents or timing. Review it in the Editor before exporting."
+        }
+      }
+    },
+    "overview": {
+      "regionLabel": "Export timeline overview",
+      "title": "Timeline overview",
+      "readOnly": "Read-only",
+      "fullTimeline": "Full timeline",
+      "inOut": "In / Out",
+      "audioTrack": "Audio {{number}}",
+      "videoTrack": "Video {{number}}",
+      "audioClip": "Audio clip",
+      "clip": "Clip",
+      "timecodeHint": "Timecode uses non-drop-frame numbering.",
+      "frameRate": "{{fps}} fps",
+      "muted": "Muted",
+      "hidden": "Hidden",
+      "excludedBySolo": "Excluded by solo",
+      "inactive": "Inactive",
+      "empty": "No clips on this timeline",
+      "startBoundary": "First frame of the export range",
+      "endBoundary": "The Out boundary is exclusive; its frame is not exported.",
+      "scrubLabel": "Scrub export preview",
+      "scrubValue": "{{timecode}} at {{fps}} frames per second, non-drop-frame"
+    },
+    "deliveryPresets": {
+      "title": "Delivery presets",
+      "more": "More presets",
+      "customHelp": "Adjust the settings below, or choose a preset as a starting point.",
+      "hdLimit": "YouTube HD limit",
+      "uhdLimit": "YouTube 4K limit",
+      "sizeHelp": "Fits within HD or 4K while keeping the timeline’s orientation. Smaller timelines are not enlarged.",
+      "items": {
+        "youtube-1080p": {
+          "label": "YouTube 1080p",
+          "detail": "Up to HD · MP4",
+          "summary": "H.264 upload with an HD size cap. Keeps aspect ratio and project FPS; never enlarges."
+        },
+        "youtube-4k": {
+          "label": "YouTube 4K",
+          "detail": "Up to 4K · MP4",
+          "summary": "H.264 upload with a 4K size cap. Keeps aspect ratio and project FPS; never enlarges."
+        },
+        "h264-master": {
+          "label": "H.264 Master",
+          "detail": "High-quality MP4",
+          "summary": "High-quality H.264 at project size, with CRF 16 and source media."
+        },
+        "prores-master": {
+          "label": "ProRes Master",
+          "detail": "ProRes HQ · MOV",
+          "summary": "Large, editing-friendly ProRes HQ MOV at project size."
+        },
+        "review-copy": {
+          "label": "Review Copy",
+          "detail": "Small, quick sharing",
+          "summary": "Smaller half-resolution review MP4. Uses available proxies for quicker renders."
+        }
+      }
+    },
+    "workspace": {
+      "preview": "Timeline preview",
+      "previewHelp": "Review at timeline settings. Export resolution, encoding and audio settings are applied when rendering.",
+      "hideQueue": "Hide queue",
+      "resizeSettings": "Resize export settings",
+      "resizeQueue": "Resize export queue",
+      "resizePanelHelp": "Drag to resize. Double-click or press Enter to reset. Arrow keys adjust width; hold Shift for larger steps.",
+      "showQueue": "Show queue",
+      "customPreset": "Custom settings",
+      "width": "Width",
+      "height": "Height",
+      "audioSettings": "Audio settings",
+      "advancedEncoding": "Advanced encoding",
+      "encodingPerformance": "Encoding & performance",
+      "handoff": "Send to another editor",
+      "duration": "Duration",
+      "missingMarks": "Set both In/Out marks in the editor to use that range.",
+      "missingMarksFallback": "In/Out marks are missing; the full timeline will be exported.",
+      "collapsedMarks": "In and Out are at the same position. Set distinct marks in the editor or choose Full Timeline.",
+      "queueHelp": "Jobs use the current timeline and In/Out marks when started. Save locations are chosen at export.",
+      "pauseAfterCurrent": "Pause after current",
+      "clearQueue": "Clear queue",
+      "exportNow": "Export now",
+      "status": {
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "completed": "Completed",
+        "failed": "Failed",
+        "stopped": "Stopped"
+      }
+    },
     "title": "Export",
     "headerReady": "Queue + settings ready",
     "ready": "Ready to export",
@@ -723,6 +902,7 @@
       },
       "actions": {
         "timeline": {
+          "playAround": "Play around edit",
           "selectToEnd": "Select clips from playhead to end",
           "selectFromStart": "Select clips from start to playhead",
           "splitActive": "Split at playhead on active track",
@@ -738,6 +918,7 @@
           "previousMarker": "Jump to previous marker",
           "nextMarker": "Jump to next marker",
           "frameAll": "Frame all timeline content",
+          "zoomToSelection": "Zoom to selection / restore previous view",
           "zoomOut": "Zoom out timeline",
           "zoomIn": "Zoom in timeline",
           "openMoveBy": "Open Move By dialog",
@@ -1146,6 +1327,7 @@
       "toolTrim": "Trim clip heads/tails from their edges.",
       "toolRazor": "Click any clip to split it at the cursor.",
       "toolSlip": "Drag inside a video/audio clip to slip source timing without moving it.",
+      "toolSlide": "Slide a clip between two touching neighbors. Its source and duration stay unchanged; the neighboring edges trim together.",
       "snapping": "Snapping {{state}} ({{shortcut}} to toggle)",
       "ripple": "Ripple Edit {{state}} ({{shortcut}} to toggle) - Moving clips shifts subsequent clips",
       "generateMusic": "Generate music with ACE-Step — duration prefills from the in/out range",
@@ -1155,6 +1337,9 @@
       "durationBy": "Change selected clip duration by an exact signed amount{{shortcut}}",
       "moreTools": "More tools",
       "frameAll": "Frame all – fit timeline or all clips in view",
+      "zoomToSelection": "Zoom to Selection",
+      "restoreSelectionView": "Restore Previous View",
+      "zoomToSelectionHelp": "Fit selected clips; repeat to restore the previous zoom and scroll position",
       "trackHeightCompact": "Compact tracks — fit the most tracks on screen",
       "trackHeightNormal": "Normal track height",
       "trackHeightTall": "Tall tracks — room for waveforms and keyframes",

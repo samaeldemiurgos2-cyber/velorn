@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Volume2, Film, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowLeftToLine, ArrowRightToLine, Repeat, Repeat1, ArrowLeftRight, Check } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Volume2, Film, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowLeftToLine, ArrowRightToLine, Repeat, Repeat1, ArrowLeftRight, Check, RotateCcw } from 'lucide-react'
 import useAssetsStore from '../stores/assetsStore'
 import useTimelineStore from '../stores/timelineStore'
 import useProjectStore from '../stores/projectStore'
 import TimelineSwitcher from './TimelineSwitcher'
-import { isTextEditingElement } from '../utils/keyboardFocus'
+import { isNativeTransportActivation, isSpaceKey, isTransportKeyboardBlocked } from '../utils/transportKeyboardGuards.mjs'
 import { getShuttleKeyAction } from '../utils/shuttlePlayback'
 import { formatTimecode, getSafeTimelineFps, stepTimeByFrames } from '../utils/timelineFrames'
+import { DEFAULT_EDITOR_HOTKEYS, EDITOR_HOTKEY_IDS, EDITOR_HOTKEYS_CHANGED_EVENT, getEditorHotkeys, matchEditorHotkey, formatEditorHotkey } from '../services/editorHotkeys'
 
 const SPACE_MODIFIER_USED_EVENT = 'comfystudio-space-modifier-used'
 
@@ -21,10 +22,31 @@ const PLAYBACK_MODES = [
 
 function TransportControls() {
   // Track if K is held for slow shuttle
-  const [isKHeld, setIsKHeld] = useState(false)
+  const isKHeldRef = useRef(false)
   // Distinguish Space tap (play/pause) from Space+drag (pan/zoom modifiers)
   const pendingSpaceToggleRef = useRef(false)
   const spaceUsedAsModifierRef = useRef(false)
+  const [editorHotkeys, setEditorHotkeys] = useState(DEFAULT_EDITOR_HOTKEYS)
+  useEffect(() => {
+    let alive = true
+    let revision = 0
+    const update = async (event) => {
+      const request = ++revision
+      if (event?.detail) {
+        setEditorHotkeys(event.detail)
+        return
+      }
+      try {
+        const next = await getEditorHotkeys()
+        if (alive && request === revision) setEditorHotkeys(next)
+      } catch (_) {
+        // Keep the current/default bindings if preferences are unavailable.
+      }
+    }
+    update()
+    window.addEventListener(EDITOR_HOTKEYS_CHANGED_EVENT, update)
+    return () => { alive = false; window.removeEventListener(EDITOR_HOTKEYS_CHANGED_EVENT, update) }
+  }, [])
   
   // Context menu state for playback mode
   const [showPlaybackMenu, setShowPlaybackMenu] = useState(false)
@@ -86,6 +108,26 @@ function TransportControls() {
   const duration = timelineMode ? (endTime || 60) : assetDuration
   const hasContent = timelineMode ? clips.length > 0 : currentPreview !== null
   const playDisabled = !hasContent || Boolean(mediaPreparation?.critical)
+  const keyboardSessionId = useTimelineStore(state => state.timelineSessionId)
+  const playAround = useTimelineStore(state => state.playAround)
+  const playAroundHotkey = formatEditorHotkey(editorHotkeys[EDITOR_HOTKEY_IDS.PLAY_AROUND])
+  const startPlayAround = () => {
+    if (!timelineMode || playDisabled || document.querySelector('[data-play-around-blocked="true"]')) return false
+    return useTimelineStore.getState().startPlayAround()
+  }
+
+  // Source audition and project preparation own their own transport. Cancel
+  // synchronously on mode changes, even if React hasn't painted that mode yet.
+  useEffect(() => {
+    const check = state => {
+      if (state.previewMode !== 'timeline' || state.mediaPreparation?.critical) {
+        useTimelineStore.getState().cancelPlayAround()
+      }
+    }
+    const unsubscribe = useAssetsStore.subscribe(check)
+    check(useAssetsStore.getState())
+    return unsubscribe
+  }, [])
 
   const selectedLoopRange = useMemo(() => {
     if (!timelineMode) return null
@@ -176,13 +218,53 @@ function TransportControls() {
 
   // JKL Shuttle keyboard handlers
   useEffect(() => {
+    const resetHeldKeys = () => {
+      isKHeldRef.current = false
+      pendingSpaceToggleRef.current = false
+      spaceUsedAsModifierRef.current = false
+    }
+    const sessionChanged = () => {
+      const assets = useAssetsStore.getState()
+      return assets.previewMode !== previewMode || assets.currentPreview?.id !== currentPreview?.id
+        || assets.mediaPreparation?.critical || useTimelineStore.getState().timelineSessionId !== keyboardSessionId
+    }
     const handleKeyDown = (e) => {
-      const active = document.activeElement
-      const target = e.target
-      if (isTextEditingElement(active) || isTextEditingElement(target)) return
+      if (sessionChanged() || isTransportKeyboardBlocked(e, { allowDefaultPrevented: e.key === 'Escape' })) {
+        resetHeldKeys()
+        return
+      }
 
-      // Reserve timeline frame-step on Left/Right globally so inspector controls
-      // don't trap arrow keys when the user expects timeline navigation.
+      if (e.key === 'Escape' && (useTimelineStore.getState().playAround || e.defaultPrevented)) {
+        useTimelineStore.getState().cancelPlayAround()
+        e.preventDefault()
+        return
+      }
+      if (matchEditorHotkey(e, editorHotkeys[EDITOR_HOTKEY_IDS.PLAY_AROUND])) {
+        // Shift+K must not also be interpreted as shuttle Pause. Read the
+        // configured binding, including custom/unbound legacy preferences.
+        e.preventDefault()
+        if (e.repeat || [...document.querySelectorAll('[aria-modal="true"], [role="dialog"], .fixed.inset-0')]
+          .some(element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden')) return
+        startPlayAround()
+        return
+      }
+      // Configured editor actions own their keys before hard-coded transport,
+      // irrespective of the order of the two window keyboard listeners.
+      if (Object.values(editorHotkeys).some(binding => matchEditorHotkey(e, binding))) return
+
+      // Other modified keys keep their native/editor meaning. Alt/Option+X
+      // remains the existing explicit timeline-range clearing shortcut.
+      if ((e.altKey || e.metaKey) && !e.ctrlKey && e.key.toLowerCase() === 'x') {
+        resetHeldKeys()
+        e.preventDefault()
+        clearInOutPoints()
+        return
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) { resetHeldKeys(); return }
+      if (e.shiftKey && (isSpaceKey(e) || e.key === 'Enter')) { resetHeldKeys(); return }
+      if (!isSpaceKey(e)) pendingSpaceToggleRef.current = false
+
+      // Native form controls retain their own arrows (guarded above).
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         frameBack()
@@ -195,11 +277,11 @@ function TransportControls() {
       }
 
       // Only unmodified/Shift JKL belongs to transport (Ctrl+Shift+L unlinks).
-      const shuttleAction = getShuttleKeyAction(e, isKHeld)
+      const shuttleAction = getShuttleKeyAction(e, isKHeldRef.current)
       if (shuttleAction && timelineMode && !playDisabled) {
         e.preventDefault()
         if (shuttleAction.type === 'pause') {
-          setIsKHeld(true)
+          isKHeldRef.current = true
           shuttlePause()
         } else if (shuttleAction.type === 'hold-slow' || shuttleAction.type === 'step-slow') {
           shuttleSlow(shuttleAction.direction, shuttleAction.type === 'step-slow')
@@ -222,16 +304,9 @@ function TransportControls() {
         setOutPoint()
       }
       
-      // Clear I/O with Option/Alt + X
-      if ((e.altKey || e.metaKey) && e.key === 'x') {
-        e.preventDefault()
-        clearInOutPoints()
-      }
-      
       // Enter = Play/Pause toggle (legacy shortcut)
       if (e.key === 'Enter' && !e.repeat) {
-        const target = e.target
-        if (isTextEditingElement(target)) return
+        if (isNativeTransportActivation(e)) return
         if (!playDisabled) {
           e.preventDefault()
           togglePlay()
@@ -240,25 +315,31 @@ function TransportControls() {
       
       // Space = Play/Pause toggle on keyup.
       // We defer to keyup so Space+drag (pan/zoom in timeline/preview) doesn't toggle playback.
-      if (e.code === 'Space' && !e.repeat) {
+      if (isSpaceKey(e)) {
         if (playDisabled) return
-        pendingSpaceToggleRef.current = true
-        spaceUsedAsModifierRef.current = false
         e.preventDefault()
+        if (!e.repeat) {
+          pendingSpaceToggleRef.current = true
+          spaceUsedAsModifierRef.current = false
+        }
       }
       
     }
     
     const handleKeyUp = (e) => {
       if (e.key === 'k' || e.key === 'K') {
-        setIsKHeld(false)
+        isKHeldRef.current = false
       }
 
-      if (e.code === 'Space') {
+      if (sessionChanged() || isTransportKeyboardBlocked(e) || e.ctrlKey || e.metaKey || e.altKey) {
+        resetHeldKeys()
+        return
+      }
+      if (isSpaceKey(e)) {
         const shouldToggle = pendingSpaceToggleRef.current && !spaceUsedAsModifierRef.current
         pendingSpaceToggleRef.current = false
         spaceUsedAsModifierRef.current = false
-        if (shouldToggle && !playDisabled) {
+        if (shouldToggle && !playDisabled && !e.shiftKey && !e.repeat) {
           e.preventDefault()
           togglePlay()
         }
@@ -276,13 +357,19 @@ function TransportControls() {
         spaceUsedAsModifierRef.current = true
       }
     }
-    const handleBlur = () => setIsKHeld(false)
+    const handleBlur = () => {
+      resetHeldKeys()
+      useTimelineStore.getState().cancelPlayAround()
+    }
     
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
     window.addEventListener('mousedown', handleMouseDown)
     window.addEventListener(SPACE_MODIFIER_USED_EVENT, handleSpaceModifierUsed)
     window.addEventListener('blur', handleBlur)
+    document.addEventListener('focusin', resetHeldKeys, true)
+    document.addEventListener('pointerdown', handleMouseDown, true)
+    document.addEventListener('visibilitychange', handleBlur)
     
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
@@ -290,8 +377,24 @@ function TransportControls() {
       window.removeEventListener('mousedown', handleMouseDown)
       window.removeEventListener(SPACE_MODIFIER_USED_EVENT, handleSpaceModifierUsed)
       window.removeEventListener('blur', handleBlur)
+      document.removeEventListener('focusin', resetHeldKeys, true)
+      document.removeEventListener('pointerdown', handleMouseDown, true)
+      document.removeEventListener('visibilitychange', handleBlur)
     }
-  }, [isKHeld, timelineMode, playDisabled, isPlaying, togglePlay, shuttleReverse, shuttlePause, shuttleForward, shuttleSlow, setInPoint, setOutPoint, clearInOutPoints, frameBack, frameForward])
+  }, [editorHotkeys, keyboardSessionId, previewMode, currentPreview?.id, timelineMode, playDisabled, isPlaying, togglePlay, shuttleReverse, shuttlePause, shuttleForward, shuttleSlow, setInPoint, setOutPoint, clearInOutPoints, frameBack, frameForward])
+
+  // Effects above rebind for live transport values; only a new ownership
+  // session (or true unmount) retires a still-held Space/K gesture.
+  useEffect(() => {
+    pendingSpaceToggleRef.current = false
+    spaceUsedAsModifierRef.current = false
+    isKHeldRef.current = false
+    return () => {
+      pendingSpaceToggleRef.current = false
+      spaceUsedAsModifierRef.current = false
+      isKHeldRef.current = false
+    }
+  }, [keyboardSessionId, previewMode, currentPreview?.id, playDisabled])
 
   // Format playback rate display
   const getPlaybackRateDisplay = () => {
@@ -408,6 +511,16 @@ function TransportControls() {
       
       {/* Center controls - Full transport */}
       <div className="flex items-center gap-1">
+        {timelineMode && <button
+          type="button"
+          data-testid="play-around-button"
+          aria-label="Play around edit"
+          aria-pressed={Boolean(playAround)}
+          onClick={startPlayAround}
+          disabled={playDisabled}
+          className={`p-1.5 rounded transition-colors disabled:opacity-40 ${playAround ? 'bg-sf-accent/20 text-sf-accent' : 'text-sf-text-secondary hover:bg-sf-dark-700'}`}
+          title={`Play around edit${playAroundHotkey !== 'Not set' ? ` (${playAroundHotkey})` : ''} — 2 seconds before/after, then return. Escape cancels.`}
+        ><RotateCcw className="w-4 h-4" /></button>}
         {/* Go to Start */}
         <button 
           onClick={goToStart}

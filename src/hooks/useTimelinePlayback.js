@@ -1,5 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react'
 import useTimelineStore from '../stores/timelineStore'
+import { getCurrentPlaybackJump, PLAYBACK_JUMP_TIMEOUT_MS } from '../utils/playbackJump.mjs'
+import { getCurrentPlayAround } from '../utils/playAround.mjs'
+import { getPlaybackReviewRange } from '../utils/playbackReviewRange.mjs'
 
 const getSelectedLoopRange = (clips, selectedClipIds) => {
   if (!Array.isArray(clips) || clips.length === 0) return null
@@ -28,10 +31,12 @@ const getSelectedLoopRange = (clips, selectedClipIds) => {
  * Hook to manage timeline playback
  * Advances the playhead and provides playback state
  */
-export function useTimelinePlayback() {
+export function useTimelinePlayback({ playbackRange = null, cancelPlayAroundOnUnmount = true } = {}) {
   const animationFrameRef = useRef(null)
   const lastTimeRef = useRef(performance.now())
   const activeClipRef = useRef(null)
+  const optionsRef = useRef(null)
+  optionsRef.current = { playbackRange, cancelPlayAroundOnUnmount }
   
   const {
     isPlaying,
@@ -79,6 +84,48 @@ export function useTimelinePlayback() {
   // Track ping-pong direction (1 = forward, -1 = reverse)
   const pingPongDirectionRef = useRef(1)
 
+  // Reset synchronously on request/release, not after a React render. Decoder
+  // wait time must never become a large first transport step after landing.
+  // The watchdog also covers a missing renderer or a cache video that errors
+  // before any presentation callback; the request token makes old timers inert.
+  useEffect(() => {
+    let timeout = null
+    let watchedToken = null
+    const observe = (state, previous = null) => {
+      // Authored edits, direct replacements and range/context changes retire
+      // the audition without seeking back into a document the user has left.
+      if (state.playAround && !getCurrentPlayAround(state)) {
+        state.cancelPlayAround(state.playAround.token)
+        return
+      }
+      const request = getCurrentPlaybackJump(state)
+      const previousRequest = getCurrentPlaybackJump(previous)
+      if (request !== previousRequest || state.isPlaying !== previous?.isPlaying
+        || state.playbackRate !== previous?.playbackRate || state.timelineSessionId !== previous?.timelineSessionId) {
+        lastTimeRef.current = performance.now()
+      }
+      if ((request?.token || null) === watchedToken) return
+      if (timeout !== null) clearTimeout(timeout)
+      timeout = null
+      watchedToken = request?.token || null
+      if (request) {
+        const remaining = Math.max(0, PLAYBACK_JUMP_TIMEOUT_MS - (Date.now() - request.requestedAt))
+        timeout = setTimeout(() => {
+          timeout = null
+          useTimelineStore.getState().failPlaybackJump(request.token,
+            'The requested playback frame did not become ready.')
+        }, remaining)
+      }
+    }
+    observe(useTimelineStore.getState())
+    const unsubscribe = useTimelineStore.subscribe(observe)
+    return () => {
+      unsubscribe()
+      if (timeout !== null) clearTimeout(timeout)
+      if (optionsRef.current.cancelPlayAroundOnUnmount) useTimelineStore.getState().cancelPlayAround?.()
+    }
+  }, [])
+
   // Main playback loop with JKL shuttle support and loop modes
   const tick = useCallback(() => {
     const now = performance.now()
@@ -87,6 +134,39 @@ export function useTimelinePlayback() {
     
     // Convert to seconds and apply playback rate (supports reverse with negative rate)
     const state = useTimelineStore.getState()
+    if (!state.isPlaying) return
+    if (getCurrentPlaybackJump(state)) {
+      animationFrameRef.current = requestAnimationFrame(tick)
+      return
+    }
+    // A review surface plays its requested output range once, independently
+    // of editor loop/selection preferences. It uses the same clock and jump
+    // readiness barrier above, without changing any authored timeline state.
+    if (optionsRef.current.playbackRange) {
+      const range = getPlaybackReviewRange(optionsRef.current.playbackRange, state.getTimelineEndTime(),
+        optionsRef.current.playbackRange.fps || state.timelineFps)
+      const rate = Number(state.playbackRate) || 1
+      const nextPosition = state.playheadPosition + (deltaMs / 1000) * rate
+      if (range.duration <= 0 || (rate > 0 && nextPosition >= range.end) || (rate < 0 && nextPosition <= range.start)) {
+        setPlayheadPosition(rate < 0 ? range.start : range.lastFrame, { source: 'transport' })
+        shuttlePause()
+        return
+      }
+      setPlayheadPosition(Math.max(range.start, nextPosition), { source: 'transport' })
+      if (useTimelineStore.getState().isPlaying) animationFrameRef.current = requestAnimationFrame(tick)
+      return
+    }
+    const audition = getCurrentPlayAround(state)
+    if (audition) {
+      const nextPosition = state.playheadPosition + deltaMs / 1000
+      if (nextPosition >= audition.endTime) {
+        state.finishPlayAround(audition.token)
+        return
+      }
+      setPlayheadPosition(nextPosition, { source: 'transport' })
+      if (useTimelineStore.getState().isPlaying) animationFrameRef.current = requestAnimationFrame(tick)
+      return
+    }
     const { loopMode, inPoint, outPoint } = state
     const selectionLoopRange = getSelectedLoopRange(state.clips, state.selectedClipIds)
     const effectiveLoopMode = loopMode === 'loop-selection' && !selectionLoopRange
@@ -101,6 +181,7 @@ export function useTimelinePlayback() {
     
     const deltaSeconds = (deltaMs / 1000) * effectiveRate
     let newPosition = state.playheadPosition + deltaSeconds
+    let discontinuity = false
     const endTime = state.getTimelineEndTime()
     
     // Determine loop boundaries
@@ -119,6 +200,7 @@ export function useTimelinePlayback() {
         case 'loop-selection':
           // Loop back to start
           newPosition = loopStart
+          discontinuity = true
           break
         case 'ping-pong':
           // Reverse direction
@@ -127,7 +209,7 @@ export function useTimelinePlayback() {
           break
         default:
           // Normal mode - stop at end
-          setPlayheadPosition(loopEnd)
+          setPlayheadPosition(loopEnd, { source: 'transport' })
           if (state.isPlaying) {
             shuttlePause()
           }
@@ -143,6 +225,7 @@ export function useTimelinePlayback() {
         case 'loop-selection':
           // Loop to end
           newPosition = loopEnd
+          discontinuity = true
           break
         case 'ping-pong':
           // Reverse direction
@@ -151,7 +234,7 @@ export function useTimelinePlayback() {
           break
         default:
           // Normal mode - stop at start
-          setPlayheadPosition(loopStart)
+          setPlayheadPosition(loopStart, { source: 'transport' })
           if (state.isPlaying) {
             shuttlePause()
           }
@@ -159,10 +242,10 @@ export function useTimelinePlayback() {
       }
     }
     
-    setPlayheadPosition(Math.max(loopStart, Math.min(loopEnd, newPosition)))
+    setPlayheadPosition(Math.max(loopStart, Math.min(loopEnd, newPosition)), { source: 'transport', discontinuity })
     
     // Continue loop if still playing
-    if (state.isPlaying) {
+    if (useTimelineStore.getState().isPlaying) {
       animationFrameRef.current = requestAnimationFrame(tick)
     }
   }, [setPlayheadPosition, shuttlePause])
@@ -225,6 +308,3 @@ export function useTimelinePlayback() {
 }
 
 export default useTimelinePlayback
-
-
-

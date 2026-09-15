@@ -28,6 +28,9 @@ import { getGlslPreviewQualityScale } from '../utils/glslEffects'
 import { getShapeCanvasRect } from '../utils/shapes'
 import { getClipQuadCorners } from '../services/exporter'
 import { isFrameStepSeekIntentAtTime, isSamePreciseVideoSeekTarget } from '../utils/previewVideoSeeking'
+import { getCurrentPlaybackJump } from '../utils/playbackJump.mjs'
+import { landPlaybackJumpVideo } from '../utils/playbackJumpVideo.mjs'
+import { getPreviewFrameSnapshot } from '../services/previewFrameTap'
 import { useI18n } from '../i18n/I18nContext'
 
 const SPACE_MODIFIER_USED_EVENT = 'comfystudio-space-modifier-used'
@@ -295,7 +298,7 @@ function formatPreviewChunkRange(range) {
   return `${formatPreviewChunkTime(range?.rangeStart)}-${formatPreviewChunkTime(range?.rangeEnd)}`
 }
 
-function PreviewPanel() {
+function PreviewPanel({ reviewOnly = false, playbackRange = null } = {}) {
   const { t } = useI18n()
   const videoRefA = useRef(null) // Used for asset preview mode
   const containerRef = useRef(null)
@@ -348,9 +351,12 @@ function PreviewPanel() {
     togglePlay: assetTogglePlay,
     seekTo: assetSeekTo,
     setVolume,
-    previewMode,
+    previewMode: storedPreviewMode,
     setPreviewMode
   } = useAssetsStore()
+  // Review is always the timeline, without disturbing the editor's selected
+  // source tab, asset playhead, selection, or mask-edit state.
+  const previewMode = reviewOnly ? 'timeline' : storedPreviewMode
   
   // Timeline store for adding clips and playback
   const { 
@@ -358,6 +364,8 @@ function PreviewPanel() {
     isPlaying: timelineIsPlaying,
     playheadPosition,
     playheadSeekIntent,
+    playbackJump,
+    playbackJumpError,
     setPlayheadPosition,
     togglePlay: timelineTogglePlay,
     getActiveClipAtTime,
@@ -391,9 +399,9 @@ function PreviewPanel() {
 
   // Pen-draw mode ends when the selection changes or the panel unmounts.
   useEffect(() => {
-    if (!maskDrawActive) return undefined
+    if (reviewOnly || !maskDrawActive) return undefined
     return () => useTimelineStore.getState().setMaskDrawActive(false)
-  }, [maskDrawActive, selectedClipIds])
+  }, [maskDrawActive, selectedClipIds, reviewOnly])
   
   // Use timeline playback hook
   const {
@@ -401,7 +409,7 @@ function PreviewPanel() {
     transitionInfo,
     sourceTime,
     endTime,
-  } = useTimelinePlayback()
+  } = useTimelinePlayback({ playbackRange: reviewOnly ? playbackRange : null, cancelPlayAroundOnUnmount: !reviewOnly })
   
   // Get full clip data with transform for the active clip
   const getClipTransform = (clip) => {
@@ -573,19 +581,21 @@ function PreviewPanel() {
   })
   // Persist info overlay preference
   useEffect(() => {
+    if (reviewOnly) return
     try {
       localStorage.setItem('previewShowInfoOverlay', JSON.stringify(showInfoOverlay))
     } catch {
       // Ignore localStorage errors.
     }
-  }, [showInfoOverlay])
+  }, [showInfoOverlay, reviewOnly])
   useEffect(() => {
+    if (reviewOnly) return
     try {
       localStorage.setItem(PREVIEW_TRANSFORM_CONTROLS_KEY, JSON.stringify(showPreviewTransformControls))
     } catch {
       // Ignore localStorage errors.
     }
-  }, [showPreviewTransformControls])
+  }, [showPreviewTransformControls, reviewOnly])
   // Get timeline-specific settings and project handle for preview caching.
   const { getCurrentTimelineSettings, currentProjectHandle, currentTimelineId } = useProjectStore()
   const timelineSettings = getCurrentTimelineSettings()
@@ -686,6 +696,8 @@ function PreviewPanel() {
     [currentTimelineId, clips, tracks, transitions, timelineDuration, timelineFps, assets]
   )
   const chunkVideoRef = useRef(null)
+  const jumpCoverRef = useRef(null)
+  const [showJumpProgress, setShowJumpProgress] = useState(false)
   const chunkCacheAbortRef = useRef(null)
   const [previewChunks, setPreviewChunks] = useState([])
   const previewChunksRef = useRef([])
@@ -710,10 +722,11 @@ function PreviewPanel() {
   // the ruler bar goes amber and playback falls back to live compositing
   // (the chunk itself is pruned by the effect above).
   useEffect(() => {
+    if (reviewOnly) return
     if (rangeRenderState?.status === 'cached' && rangeRenderState.signature !== currentSignature) {
       useTimelineStore.getState().setRangeRenderState({ ...rangeRenderState, status: 'stale' })
     }
-  }, [currentSignature, rangeRenderState])
+  }, [currentSignature, rangeRenderState, reviewOnly])
 
   const buildPreviewChunkRanges = useCallback(() => {
     const timelineEnd = Math.max(0, Number(getTimelineEndTime?.()) || Number(timelineDuration) || 0)
@@ -983,6 +996,36 @@ function PreviewPanel() {
     )) || null
   }, [currentSignature, playheadPosition, previewChunks])
 
+  // Snapshot only at an explicit jump, not on every playback frame. This cover
+  // survives live/cached source remounts while the new destination decodes.
+  useEffect(() => useTimelineStore.subscribe((next, previous) => {
+    const jump = getCurrentPlaybackJump(next)
+    if (jump?.token === getCurrentPlaybackJump(previous)?.token) return
+    const cover = jumpCoverRef.current
+    if (!cover) return
+    if (!jump) { cover.style.display = 'none'; return }
+    if (getCurrentPlaybackJump(previous) && cover.style.display === 'block') return
+    const source = chunkVideoRef.current || getPreviewFrameSnapshot()?.canvas
+    const width = source?.videoWidth || source?.width
+    const height = source?.videoHeight || source?.height
+    if (!source || !width || !height) return
+    try {
+      cover.width = width; cover.height = height
+      cover.getContext('2d').drawImage(source, 0, 0, width, height)
+      cover.style.display = 'block'
+    } catch (_) { /* A cold source has no previous picture to preserve. */ }
+  }), [])
+
+  useEffect(() => {
+    setShowJumpProgress(false)
+    const jump = getCurrentPlaybackJump(useTimelineStore.getState())
+    if (!jump) return undefined
+    const timer = window.setTimeout(() => {
+      if (getCurrentPlaybackJump(useTimelineStore.getState())?.token === jump.token) setShowJumpProgress(true)
+    }, 200)
+    return () => window.clearTimeout(timer)
+  }, [playbackJump, timelineIsPlaying])
+
   const stopPreviewChunkCache = useCallback(() => {
     chunkCacheAbortRef.current?.abort()
     setChunkCacheState((prev) => ({
@@ -1000,6 +1043,23 @@ function PreviewPanel() {
     if (!chunkVideoRef.current || !activePreviewChunk?.url) return
     const video = chunkVideoRef.current
     const chunkTime = Math.max(0, playheadPosition - activePreviewChunk.rangeStart)
+    const jump = getCurrentPlaybackJump(useTimelineStore.getState())
+    if (jump) {
+      let cancelled = false, frame = 0
+      const landing = landPlaybackJumpVideo(video, { targetTime: chunkTime, fps: timelineFps || 30,
+        onReady: () => {
+          // rVFC confirmed the decoded target; give the visible video surface
+          // a presentation turn before removing the held previous picture.
+          frame = requestAnimationFrame(() => {
+            if (!cancelled && chunkVideoRef.current === video && landing.isReady()) {
+              useTimelineStore.getState().completePlaybackJump(jump.token)
+            }
+          })
+        },
+        onError: message => { if (!cancelled) useTimelineStore.getState().failPlaybackJump(jump.token, message) },
+      })
+      return () => { cancelled = true; landing.cancel(); if (frame) cancelAnimationFrame(frame) }
+    }
     const isPreciseFrameStep = !timelineIsPlaying
       && isFrameStepSeekIntentAtTime(playheadSeekIntent, playheadPosition)
     const shouldSeek = isPreciseFrameStep
@@ -1009,15 +1069,18 @@ function PreviewPanel() {
       video.currentTime = chunkTime
     }
     if (timelineIsPlaying) {
+      const rate = Math.abs(Number(useTimelineStore.getState().playbackRate)) || 1
+      if (Math.abs(video.playbackRate - rate) > 0.001) video.playbackRate = rate
       video.play().catch(() => {})
     } else {
       video.pause()
     }
-  }, [activePreviewChunk, playheadPosition, playheadSeekIntent, timelineIsPlaying])
+  }, [activePreviewChunk, playheadPosition, playheadSeekIntent, timelineIsPlaying, playbackJump, timelineFps])
   
   // Register video ref with store (for asset preview mode - only for video assets)
   // Use a timeout to ensure the video element is mounted after switching previews
   useEffect(() => {
+    if (reviewOnly) return undefined
     // Only register video ref for video assets (not masks or images)
     const isVideoAsset = currentPreview && currentPreview.type !== 'mask' && currentPreview.type !== 'image'
     
@@ -1037,7 +1100,7 @@ function PreviewPanel() {
       // Clear ref for non-video assets so togglePlay knows to handle them differently
       registerVideoRef(null)
     }
-  }, [registerVideoRef, volume, previewMode, currentPreview])
+  }, [registerVideoRef, volume, previewMode, currentPreview, reviewOnly])
 
   // Get all active video clips at current playhead position (for overlay display only)
   useEffect(() => {
@@ -1073,6 +1136,7 @@ function PreviewPanel() {
     if (previewMode !== 'timeline') return null
     const selectedId = selectedClipIds?.[0]
     if (!selectedId) return null
+    if (clips.find(clip => clip.id === selectedId)?.type === 'compound') return null
     const activeEntry = activeLayerClipById.get(selectedId)
     if (!activeEntry) return null
     if (!['video', 'image', 'text', 'shape'].includes(activeEntry.clip?.type)) return null
@@ -1348,17 +1412,19 @@ function PreviewPanel() {
 
   // Switch to timeline mode when timeline playback starts
   useEffect(() => {
+    if (reviewOnly) return
     if (timelineIsPlaying && clips.length > 0) {
       setPreviewMode('timeline')
     }
-  }, [timelineIsPlaying, clips.length, setPreviewMode])
+  }, [timelineIsPlaying, clips.length, setPreviewMode, reviewOnly])
   
   // When first clip is added, switch to timeline mode
   useEffect(() => {
+    if (reviewOnly) return
     if (clips.length > 0 && previewMode === 'asset' && !currentPreview) {
       setPreviewMode('timeline')
     }
-  }, [clips.length, previewMode, currentPreview, setPreviewMode])
+  }, [clips.length, previewMode, currentPreview, setPreviewMode, reviewOnly])
   
   // Fullscreen toggle
   const toggleFullscreen = useCallback(async () => {
@@ -1466,7 +1532,7 @@ function PreviewPanel() {
   const fpsBadgeRef = useRef(null)
   const fpsSessionRef = useRef({ expected: 0, basePresented: 0, skipped: 0 })
   useEffect(() => {
-    if (previewMode !== 'timeline' || !showInfoOverlay) return undefined
+    if (reviewOnly || previewMode !== 'timeline' || !showInfoOverlay) return undefined
     const stats = playbackStatsRef.current
     const targetFps = timelineSettings?.fps || timelineFps || 30
     if (isPlaying) {
@@ -1541,7 +1607,7 @@ function PreviewPanel() {
     // timelineSettings is a fresh object every render — depending on it would
     // restart this effect (and kill the interval) on every playback repaint.
     // Depend on the fps primitive instead.
-  }, [previewMode, showInfoOverlay, isPlaying, timelineSettings?.fps, timelineFps])
+  }, [previewMode, showInfoOverlay, isPlaying, timelineSettings?.fps, timelineFps, reviewOnly])
 
   // Check if we have content to show
   const hasContent = previewMode === 'timeline' 
@@ -1660,13 +1726,15 @@ function PreviewPanel() {
   
   // Handle keyboard events for spacebar and ctrl
   useEffect(() => {
+    if (reviewOnly) return undefined
     const handleKeyDown = (e) => {
       // Don't capture when typing in inputs (use activeElement so prompt/search work)
       const active = document.activeElement
       if (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)) return
       
       if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault()
+        // Only track the pan modifier here. Transport owns a plain Space
+        // tap; pointer pan/zoom handlers consume an actual modified gesture.
         spaceHeldRef.current = true
         setIsSpaceHeld(true)
       }
@@ -1689,15 +1757,30 @@ function PreviewPanel() {
         setIsZooming(false)
       }
     }
+
+    const resetModifiers = () => {
+      spaceHeldRef.current = false
+      ctrlHeldRef.current = false
+      setIsSpaceHeld(false)
+      setIsCtrlHeld(false)
+      setIsPanning(false)
+      setIsZooming(false)
+    }
+    const handleVisibility = () => { if (document.hidden) resetModifiers() }
     
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', resetModifiers)
+    document.addEventListener('visibilitychange', handleVisibility)
     
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', resetModifiers)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      resetModifiers()
     }
-  }, [])
+  }, [reviewOnly])
   
   // Handle mouse events for panning and zooming
   const handleMouseDown = useCallback((e) => {
@@ -2282,6 +2365,82 @@ function PreviewPanel() {
     transition: isZooming || isPanning ? 'none' : 'transform 0.1s ease-out',
   }
 
+  // Editor and export review deliberately share this exact cached/live
+  // composition and playback-jump handoff. Review adds no rendering engine.
+  const timelinePicture = (
+    <>
+      <AudioLayerRenderer />
+      {activePreviewChunk ? (
+        <video
+          key={activePreviewChunk.path}
+          ref={chunkVideoRef}
+          data-preview-popout-source="video"
+          src={activePreviewChunk.url}
+          className="absolute inset-0 w-full h-full object-contain bg-black"
+          muted
+          playsInline
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget
+            const live = useTimelineStore.getState()
+            if (video !== chunkVideoRef.current || getCurrentPlaybackJump(live)
+              || live.playheadPosition < activePreviewChunk.rangeStart
+              || live.playheadPosition >= activePreviewChunk.rangeEnd
+              || computePreviewSignature(useProjectStore.getState().currentTimelineId, live) !== activePreviewChunk.signature) return
+            video.currentTime = Math.max(0, live.playheadPosition - activePreviewChunk.rangeStart)
+            if (live.isPlaying) video.play().catch(() => {})
+            else video.pause()
+          }}
+          onEnded={(event) => {
+            if (event.currentTarget === chunkVideoRef.current && useTimelineStore.getState().isPlaying) {
+              setPlayheadPosition(activePreviewChunk.rangeEnd, { snap: true, source: 'transport' })
+            }
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+        />
+      ) : (
+        <CanvasPreviewRenderer
+          timelineWidth={timelineWidth}
+          timelineHeight={timelineHeight}
+          timelineFps={timelineSettings?.fps || timelineFps || 30}
+          onClipPointerDown={reviewOnly ? undefined : handlePreviewClipPointerDown}
+          onClipDoubleClick={reviewOnly ? undefined : handlePreviewTextDoubleClick}
+          playbackStatsRef={playbackStatsRef}
+        />
+      )}
+      <canvas ref={jumpCoverRef} aria-hidden="true"
+        className="absolute inset-0 w-full h-full object-contain pointer-events-none z-40 bg-black"
+        style={{ display: 'none' }} />
+      {showJumpProgress && playbackJump && (
+        <div role="status" className="absolute bottom-3 left-3 z-50 flex items-center gap-2 rounded bg-black/75 px-3 py-2 text-xs text-white pointer-events-none">
+          <Loader2 className="w-3 h-3 animate-spin" /> Loading playback position…
+        </div>
+      )}
+      {playbackJumpError && (
+        <div role="alert" className="absolute bottom-3 left-3 right-3 z-50 rounded bg-black/85 px-3 py-2 text-xs text-amber-200">
+          Playback paused: {playbackJumpError} Try another position or check the clip’s media.
+        </div>
+      )}
+    </>
+  )
+
+  if (reviewOnly) {
+    return (
+      <div ref={panelRef} data-testid="export-review-viewport" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-sf-dark-900">
+        <div ref={viewportRef} className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden">
+          {clips.length > 0 ? (
+            <div className="relative shrink-0" style={getAspectRatioStyle()}>
+              <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-black">
+                {timelinePicture}
+              </div>
+            </div>
+          ) : (
+            <div className="px-6 text-center text-sm text-sf-text-muted">Add clips to the timeline to review your edit.</div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div 
       ref={panelRef}
@@ -2507,49 +2666,7 @@ function PreviewPanel() {
               {/* Timeline Playback Mode */}
             {previewMode === 'timeline' && clips.length > 0 ? (
               <>
-                {activePreviewChunk ? (
-                  <>
-                    <AudioLayerRenderer />
-                    <video
-                      key={activePreviewChunk.path}
-                      ref={chunkVideoRef}
-                      data-preview-popout-source="video"
-                      src={activePreviewChunk.url}
-                      className="absolute inset-0 w-full h-full object-contain bg-black"
-                      muted
-                      playsInline
-                      onLoadedMetadata={() => {
-                        if (chunkVideoRef.current) {
-                          chunkVideoRef.current.currentTime = Math.max(0, playheadPosition - activePreviewChunk.rangeStart)
-                          if (timelineIsPlaying) chunkVideoRef.current.play().catch(() => {})
-                        }
-                      }}
-                      onTimeUpdate={() => {
-                        if (chunkVideoRef.current && timelineIsPlaying) {
-                          setPlayheadPosition(activePreviewChunk.rangeStart + chunkVideoRef.current.currentTime)
-                        }
-                      }}
-                      onEnded={() => {
-                        if (timelineIsPlaying) {
-                          setPlayheadPosition(activePreviewChunk.rangeEnd, { snap: true })
-                        }
-                      }}
-                      onContextMenu={(e) => e.preventDefault()}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <AudioLayerRenderer />
-                    <CanvasPreviewRenderer
-                      timelineWidth={timelineWidth}
-                      timelineHeight={timelineHeight}
-                      timelineFps={timelineSettings?.fps || timelineFps || 30}
-                      onClipPointerDown={handlePreviewClipPointerDown}
-                      onClipDoubleClick={handlePreviewTextDoubleClick}
-                      playbackStatsRef={playbackStatsRef}
-                    />
-                  </>
-                )}
+                {timelinePicture}
                 
                 {/* Timeline Mode Overlay */}
                 {showInfoOverlay && (

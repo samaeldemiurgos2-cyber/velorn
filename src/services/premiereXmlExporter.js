@@ -377,6 +377,9 @@ export function buildPremiereXml({
   const height = Math.max(1, Math.round(safeNumber(timelineSettings.height, 1080)))
   const normalizedTimelineSettings = { width, height, fps: sequenceRate.fps }
   const clips = Array.isArray(timeline.clips) ? timeline.clips : []
+  if (clips.some(clip => clip?.type === 'compound' || clip?.compound || clip?.compoundParentId)) {
+    throw new Error('Editable compound clips are not supported by Premiere XML export yet. Export a rendered video instead.')
+  }
   const tracks = applyVideoSoloAsHidden(applySoloAsMute(Array.isArray(timeline.tracks) ? timeline.tracks : []))
   const assetsById = new Map((Array.isArray(assets) ? assets : []).map((asset) => [asset.id, asset]))
   const { videoTracks, audioTracks, items } = collectExportTracks(clips, tracks, assetsById)

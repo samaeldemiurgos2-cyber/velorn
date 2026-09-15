@@ -9,6 +9,7 @@ import parseFcpXml from '../../services/fcpxmlImporter'
 import { enqueuePlaybackTranscode, generatePlaybackCachesForAllVideos, isPlaybackCacheableVideoAsset } from '../../services/playbackCache'
 import { enqueueProxyTranscode, isProxyPlaybackEnabled } from '../../services/proxyCache'
 import { unstitchSequenceAsset } from '../../services/comfyAutoImport'
+import { checkCompoundAssetDeletion } from '../../services/compoundAssetProtection'
 import { deleteSpriteFromProject } from '../../services/thumbnailSprites'
 import { deleteVideoPosterFromProject } from '../../services/thumbnailPosters'
 import MaskGenerationDialog from '../MaskGenerationDialog'
@@ -914,12 +915,15 @@ function AssetsPanel({ isActive = true }) {
 
   const deleteAssetFilesOnly = useCallback(async (assetIds = []) => {
     const ids = Array.from(new Set((assetIds || []).filter(Boolean)))
-    if (ids.length === 0) return
+    const guard = checkCompoundAssetDeletion(ids)
+    if (!guard.ok) return guard
+    if (ids.length === 0) return { ok: true }
     const deleteSet = new Set(ids)
-    const assetsToDelete = assets.filter((asset) => deleteSet.has(asset.id))
-    if (assetsToDelete.length === 0) return
+    const liveAssets = useAssetsStore.getState().assets
+    const assetsToDelete = liveAssets.filter((asset) => deleteSet.has(asset.id))
+    if (assetsToDelete.length === 0) return { ok: true }
 
-    const remainingAssets = assets.filter((asset) => !deleteSet.has(asset.id))
+    const remainingAssets = liveAssets.filter((asset) => !deleteSet.has(asset.id))
     const remainingRelativePaths = new Set()
     const remainingAbsolutePaths = new Set()
     const addPath = (setRef, value) => {
@@ -961,6 +965,10 @@ function AssetsPanel({ isActive = true }) {
     }
 
     for (const asset of assetsToDelete) {
+      // Native deletion yields. Recheck before each asset so an intervening
+      // compound edit cannot make another queued asset unsafe to remove.
+      const latestGuard = checkCompoundAssetDeletion(ids)
+      if (!latestGuard.ok) return latestGuard
       const relativeCandidates = new Set([
         asset?.path,
         asset?.playbackCachePath,
@@ -994,7 +1002,8 @@ function AssetsPanel({ isActive = true }) {
         await deleteAbsolutePath(asset.poster.posterPath)
       }
     }
-  }, [assets, currentProjectHandle])
+    return { ok: true }
+  }, [currentProjectHandle])
 
   // Get folder breadcrumb path
   const getFolderPath = () => {
@@ -1344,6 +1353,33 @@ function AssetsPanel({ isActive = true }) {
     if (resolve) resolve(Boolean(accepted))
   }, [])
 
+  const showAssetDeletionBlock = useCallback(async (reason) => {
+    await requestConfirm({
+      title: 'Media is used in a compound',
+      message: reason,
+      confirmLabel: 'OK',
+      cancelLabel: 'Close',
+      tone: 'info',
+    })
+  }, [requestConfirm])
+
+  const allowAssetDeletion = useCallback(async (assetIds) => {
+    const guard = checkCompoundAssetDeletion(assetIds)
+    if (!guard.ok) await showAssetDeletionBlock(guard.reason)
+    return guard.ok
+  }, [showAssetDeletionBlock])
+
+  const prepareAssetDeletion = useCallback(async (assetIds) => {
+    // Confirmation can stay open while the timeline changes. Never rely on
+    // its earlier check for either project-only removal or native deletion.
+    if (!await allowAssetDeletion(assetIds)) return false
+    if (shouldDeleteFromDisk) {
+      const result = await deleteAssetFilesOnly(assetIds)
+      if (!result.ok) { await showAssetDeletionBlock(result.reason); return false }
+    }
+    return allowAssetDeletion(assetIds)
+  }, [allowAssetDeletion, deleteAssetFilesOnly, shouldDeleteFromDisk, showAssetDeletionBlock])
+
   useEffect(() => () => {
     if (confirmResolverRef.current) {
       confirmResolverRef.current(false)
@@ -1368,6 +1404,7 @@ function AssetsPanel({ isActive = true }) {
         e.preventDefault()
         e.stopPropagation()
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation()
+        if (!await allowAssetDeletion(selectedAssetIds)) return
         const count = selectedAssetIds.length
         const confirmed = await requestConfirm({
           title: count === 1 ? 'Delete asset?' : 'Delete selected assets?',
@@ -1387,9 +1424,7 @@ function AssetsPanel({ isActive = true }) {
           tone: 'danger',
         })
         if (confirmed) {
-          if (shouldDeleteFromDisk) {
-            await deleteAssetFilesOnly(selectedAssetIds)
-          }
+          if (!await prepareAssetDeletion(selectedAssetIds)) return
           selectedAssetIds.forEach(id => removeAsset(id))
           setSelectedAssetIds([])
         }
@@ -1397,7 +1432,7 @@ function AssetsPanel({ isActive = true }) {
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [selectedAssetIds, editingId, removeAsset, requestConfirm, confirmDialog, clearTimelineSelection, deleteAssetFilesOnly, shouldDeleteFromDisk])
+  }, [selectedAssetIds, editingId, removeAsset, requestConfirm, confirmDialog, clearTimelineSelection, allowAssetDeletion, prepareAssetDeletion, shouldDeleteFromDisk])
 
   // After an asset is dropped onto the timeline, the source tile still holds
   // panel selection and keyboard focus, so the next Delete press would ask to
@@ -1472,6 +1507,7 @@ function AssetsPanel({ isActive = true }) {
   // Handle delete
   const handleDelete = async (e, id) => {
     e.stopPropagation()
+    if (!await allowAssetDeletion([id])) return
     const confirmed = await requestConfirm({
       title: 'Delete asset?',
       message: shouldDeleteFromDisk
@@ -1482,9 +1518,7 @@ function AssetsPanel({ isActive = true }) {
       tone: 'danger',
     })
     if (confirmed) {
-      if (shouldDeleteFromDisk) {
-        await deleteAssetFilesOnly([id])
-      }
+      if (!await prepareAssetDeletion([id])) return
       removeAsset(id)
     }
   }
@@ -1501,6 +1535,7 @@ function AssetsPanel({ isActive = true }) {
       .filter((timeline) => folderIds.has(timeline?.folderId || null))
       .map((timeline) => timeline.id)
     const assetCount = assetIdsInFolderTree.length
+    if (!await allowAssetDeletion(assetIdsInFolderTree)) return false
     const confirmed = await requestConfirm({
       title: 'Delete folder?',
       message: shouldDeleteFromDisk
@@ -1511,15 +1546,14 @@ function AssetsPanel({ isActive = true }) {
       tone: 'danger',
     })
     if (!confirmed) return false
-    if (shouldDeleteFromDisk) {
-      await deleteAssetFilesOnly(assetIdsInFolderTree)
-    }
+    if (!await prepareAssetDeletion(assetIdsInFolderTree)) return false
+    const result = removeFolder(folderId)
+    if (result?.ok === false) { await showAssetDeletionBlock(result.reason); return false }
     timelineIdsInFolderTree.forEach((timelineId) => {
       moveTimelineToFolder(timelineId, parentFolderId)
     })
-    removeFolder(folderId)
     return true
-  }, [assets, deleteAssetFilesOnly, folderDescendantIdsByFolderId, folders, moveTimelineToFolder, projectTimelines, removeFolder, requestConfirm, shouldDeleteFromDisk])
+  }, [assets, allowAssetDeletion, prepareAssetDeletion, showAssetDeletionBlock, folderDescendantIdsByFolderId, folders, moveTimelineToFolder, projectTimelines, removeFolder, requestConfirm, shouldDeleteFromDisk])
 
   // Toggle audio on a video asset
   const handleToggleVideoAudio = (assetId) => {
@@ -1541,9 +1575,11 @@ function AssetsPanel({ isActive = true }) {
     const asset = assets.find(a => a.id === assetId)
     setContextMenu(null)
     if (!asset?.sequenceSource) return
+    if (!await allowAssetDeletion([assetId])) return
     try {
       const result = await unstitchSequenceAsset(asset)
       if (!result?.success) {
+        if (result?.blockedByCompound) await showAssetDeletionBlock(result.error)
         console.warn('[AssetsPanel] unstitch failed:', result?.error)
       }
     } catch (err) {

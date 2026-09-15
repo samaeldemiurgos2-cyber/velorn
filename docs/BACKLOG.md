@@ -630,3 +630,92 @@ Keep the naming simple: this is the cloud counterpart to Music Video Creation,
 not a new branded "director" or "lip-sync" product.
 
 ---
+
+## 5. OpenFX hosting — deferred feasibility proposal
+
+**Added:** 2026-09-13
+**Status:** Deferred by the maintainer; research/discussion only. No OFX host,
+plugin installation, purchase, vendor contact or implementation is authorized.
+
+### Why keep this parked?
+
+The desired commercial products are **Boris FX Sapphire, Neat Video and Video
+Village Filmbox**. They could extend Velorn's finishing capabilities, but the
+maintainer expects many free users will not own commercial plugins. Prioritize
+the editor and export experience now; revisit OFX when demand justifies the
+engineering and compatibility burden.
+
+### Feasibility and target-specific findings
+
+OFX hosting is possible, but would add a native subsystem beside Velorn's
+Electron/React Canvas/WebGL renderer. Existing OFX binaries cannot simply become
+entries in the GLSL effects list. Rough engineering difficulty estimates (not
+delivery commitments): one simple test plugin **5/10**, a tested cached subset
+**7/10**, dependable broad cross-platform commercial support **8–9/10**. Think
+weeks for a limited useful prototype and months plus ongoing maintenance for
+broad support; actual plugin experiments must precede a firm estimate.
+
+- **Sapphire:** the best proposed first commercial compatibility target. Boris
+  explicitly says unlisted OFX hosts may work and recommends trial testing, but
+  does not qualify or troubleshoot them. Start with selected simple effects;
+  success does not establish support for the whole suite or its custom tools.
+- **Neat Video:** its OFX edition supports Windows/macOS/Linux. Temporal filtering
+  requests surrounding frames, and its separate noise-profiling window is part
+  of the workflow. Plan for native UI and accurate multi-frame access. Version 6
+  documents RTX 5090 support; that is not proof of compatibility with Velorn.
+- **Filmbox:** current official offerings include Linux, Windows and macOS.
+  Windows/Linux requirements include GPU support. August 2026 release notes add
+  AMD/Intel through OpenCL and CPU rendering specifically for Baselight, not
+  generic CPU-host compatibility. Native GPU interoperability and correct color
+  handling are major risks. An unlisted host is unverified, not proven impossible.
+
+These findings were researched on 2026-09-13 and must be rechecked when resumed.
+Plugin format, OS/architecture, host/version support and activation requirements
+are separate questions. Users need the appropriate legitimate plugin editions;
+do not assume permission to redistribute commercial binaries with Velorn.
+
+### Existing foundations and engineering gaps
+
+- Reuse concepts from `src/services/clipRenderCache.js`,
+  `src/utils/clipBakeSignature.js`, existing undo-aware effect actions, and the
+  native optical-flow job/runtime packaging paths.
+- Build an isolated native host/helper with scan/load/render timeouts,
+  cancellation and crash recovery; process separation alone is not a security
+  sandbox for arbitrary native code.
+- Define frame timing, temporal input access, effect/transform order, image
+  formats, alpha and color precision. The current browser compositor's RGBA8
+  boundaries do not become end-to-end floating-point/HDR merely by adding OFX.
+- Map dynamic parameter descriptors, keyframes, custom plugin windows and
+  project-owned ancillary files into portable project state. Preserve missing
+  plugin settings and identify plugins by stable ID/version, not machine paths.
+- Define cache validity using plugin/version, parameters and all input/render
+  dependencies. Existing stale full bakes fall back to live rendering; an OFX
+  effect with no live implementation must instead show render-required/unavailable
+  and render or block export. Never silently omit it.
+- Test preview/export exact-frame agreement, save/reopen, missing plugins,
+  crashes, cancellation and native packaging independently on Windows/macOS/Linux.
+  The separate export-reference frame-sampling discrepancy recorded in
+  `EDITING_POLISH_CHECKPOINTS.md` must not be mistaken for solved cache parity.
+
+### If explicitly resumed
+
+Start in an isolated experimental worktree, not main. First prove the official
+host/sample-plugin plumbing, then one real Sapphire effect using an authorized
+trial or existing license. Check correctness and GPU behavior before promising
+commercial support. A render-preview/cache workflow is a reasonable first UX;
+it does not eliminate native GPU, temporal-frame or custom-UI requirements for
+the requested products. Contact vendors about host support only with approval.
+
+### Primary references
+
+- [OpenFX project and host-support library](https://github.com/AcademySoftwareFoundation/openfx)
+- [OpenFX rendering contracts and GPU support](https://openfx.readthedocs.io/en/main/Reference/ofxRendering.html)
+- [Sapphire in unlisted OFX hosts](https://support.borisfx.com/hc/en-us/articles/11037281408909-My-host-application-supports-OFX-but-I-don-t-see-it-under-Sapphire-s-list-of-supported-hosts-Is-it-safe-to-use)
+- [Neat Video OFX compatibility](https://www.neatvideo.com/features/compatibility/nv6ofx)
+- [Neat Video profiling workflow](https://www.neatvideo.com/support/quick-start-guides/nv6/nk)
+- [Neat Video GPU/version history](https://www.neatvideo.com/features/version-history/nv6ofx?os-tab=linux)
+- [Filmbox requirements](https://videovillage.com/filmbox/buy)
+- [Filmbox release notes](https://videovillage.com/filmbox/releasenotes)
+- [Filmbox color-pipeline technical FAQ](https://videovillage.com/filmbox/technical_faq)
+
+---

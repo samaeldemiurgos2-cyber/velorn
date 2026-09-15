@@ -4639,6 +4639,8 @@ registerCaptionWhisperHandlers({
 })
 
 ipcMain.handle('captions:mixTimelineAudio', async (event, options = {}) => {
+  const { buildAudioVolumeEnvelopeFilter } = await import('./audioVolumeEnvelope.mjs')
+  const { buildAudioEqFilters } = await import('./audioEq.mjs')
   if (!ffmpegPath) {
     return { success: false, error: 'FFmpeg binary not available.' }
   }
@@ -4723,8 +4725,10 @@ ipcMain.handle('captions:mixTimelineAudio', async (event, options = {}) => {
     if (clipDuration <= 0.001) { skip(clip, 'clipDuration<=0'); continue }
     const clipEnd = clipStart + clipDuration
 
-    const visibleStart = Math.max(0, clipStart)
-    const visibleEnd = Math.min(programDuration, clipEnd)
+    const windowStart = Number.isFinite(clip.playbackWindowStart) ? clip.playbackWindowStart : clipStart
+    const windowEnd = Number.isFinite(clip.playbackWindowEnd) ? clip.playbackWindowEnd : clipEnd
+    const visibleStart = Math.max(0, clipStart, windowStart)
+    const visibleEnd = Math.min(programDuration, clipEnd, windowEnd)
     if (visibleEnd <= visibleStart) { skip(clip, 'off-program'); continue }
 
     const clipOffsetOnTimeline = visibleStart - clipStart
@@ -4744,6 +4748,8 @@ ipcMain.handle('captions:mixTimelineAudio', async (event, options = {}) => {
       sourceDurationSec,
       delayMs,
       timeScale,
+      volumeEnvelopeFilter: buildAudioVolumeEnvelopeFilter(clip, clipOffsetOnTimeline),
+      audioEq: clip.audioEq,
     })
     decisions.push({
       clipId: clip.id,
@@ -4802,6 +4808,8 @@ ipcMain.handle('captions:mixTimelineAudio', async (event, options = {}) => {
       // layouts combine cleanly.
       'aformat=channel_layouts=mono',
     ]
+    filters.push(...buildAudioEqFilters(entry.audioEq, normalizedSampleRate))
+    if (entry.volumeEnvelopeFilter) filters.push(entry.volumeEnvelopeFilter)
     if (entry.delayMs > 0) {
       filters.push(`adelay=${entry.delayMs}:all=1`)
     }
@@ -6002,7 +6010,9 @@ ipcMain.handle('export:mixAudio', async (event, options = {}) => {
   const trackMap = new Map((tracks || []).map((track) => [track.id, track]))
   const assetMap = new Map((assets || []).map((asset) => [asset.id, asset]))
   const preparedInputs = []
-  const { getAudioMixDelayMilliseconds, isAudioMixClip } = await import('./audioMixEligibility.mjs')
+  const { getAudioMixDelayMilliseconds, isAudioMixClip, getClipPlaybackWindow } = await import('./audioMixEligibility.mjs')
+  const { buildAudioVolumeEnvelopeFilter } = await import('./audioVolumeEnvelope.mjs')
+  const { buildAudioEqFilters } = await import('./audioEq.mjs')
 
   // Skip ledger (the captions mixer's mold): every excluded clip gets a
   // reason. `problem: true` marks exclusions the exporter's strict
@@ -6040,6 +6050,13 @@ ipcMain.handle('export:mixAudio', async (event, options = {}) => {
     }
     if (clip.reverse) { skip(clip, 'reverse'); continue } // Matches timeline preview behavior (reverse audio is silent).
 
+    // Hidden child handles are not export inputs, even if their source is
+    // offline. Check the compound's playback window before resolving media.
+    const playbackWindow = getClipPlaybackWindow(clip)
+    const visibleStart = Math.max(rangeStartSec, playbackWindow.start)
+    const visibleEnd = Math.min(rangeEndSec, playbackWindow.end)
+    if (visibleEnd <= visibleStart) { skip(clip, 'outside-range'); continue }
+
     const asset = assetMap.get(clip.assetId)
     if (!asset) { skip(clip, 'missing-asset-record', true); continue }
 
@@ -6066,10 +6083,6 @@ ipcMain.handle('export:mixAudio', async (event, options = {}) => {
     if (clipDuration <= 0.000001) { skip(clip, 'zero-duration'); continue }
     const clipEnd = clipStart + clipDuration
 
-    const visibleStart = Math.max(rangeStartSec, clipStart)
-    const visibleEnd = Math.min(rangeEndSec, clipEnd)
-    if (visibleEnd <= visibleStart) { skip(clip, 'outside-range'); continue }
-
     const clipOffsetOnTimeline = visibleStart - clipStart
     const timeScale = getExportClipTimeScale(clip)
     if (!Number.isFinite(timeScale) || timeScale <= 0) { skip(clip, 'invalid-time-scale', true); continue }
@@ -6090,6 +6103,8 @@ ipcMain.handle('export:mixAudio', async (event, options = {}) => {
       clipDuration,
       clipOffsetOnTimeline,
       gainDb: normalizeAudioClipGainDb(clip.gainDb),
+      volumeEnvelopeFilter: buildAudioVolumeEnvelopeFilter(clip, clipOffsetOnTimeline),
+      audioEq: clip.audioEq,
       fadeIn: clampAudioFadeSeconds(clip.fadeIn, clipDuration),
       fadeOut: clampAudioFadeSeconds(clip.fadeOut, clipDuration),
       trackVolume: track.volume ?? 100,
@@ -6135,9 +6150,11 @@ ipcMain.handle('export:mixAudio', async (event, options = {}) => {
     if (entry.forceMono) {
       filters.push('aformat=channel_layouts=mono')
     }
+    filters.push(...buildAudioEqFilters(entry.audioEq, normalizedSampleRate))
     if (entry.fadeIn > 0 || entry.fadeOut > 0 || entry.gainDb !== 0 || entry.trackVolume !== 100) {
       filters.push(`volume='${buildAudioFadeVolumeExpression(entry.clipDuration, entry.fadeIn, entry.fadeOut, entry.clipOffsetOnTimeline, entry.gainDb, entry.trackVolume)}':eval=frame`)
     }
+    if (entry.volumeEnvelopeFilter) filters.push(entry.volumeEnvelopeFilter)
     if (entry.trackPan) {
       // Web Audio STEREO pan law (StereoPannerNode with stereo input); the
       // preview graph forces stereo into its panner, so upmix first to match.

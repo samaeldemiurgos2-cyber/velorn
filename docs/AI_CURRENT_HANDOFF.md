@@ -1,8 +1,14 @@
 # Current AI Handoff
 
-Last updated: 2026-08-12
+Last updated: 2026-09-14
 
-This is the live state for moving Velorn development from the old Windows checkout to a clean repository state that can be cloned on Ubuntu.
+## Current local editing review
+
+The active review checkout is `/home/jaime/Documents/coding_projects/general/velorn-editing-polish`, branch `codex/editing-workflow-polish`, version 0.3.33. It contains the accumulated approved editing-polish work; preserve it. The maintainer authorized a local checkpoint commit only. Do not implement this work in the separate main Velorn folder, merge, push or release without further maintainer approval.
+
+See `docs/EDITING_POLISH_CHECKPOINTS.md` for accepted checkpoints and current verification. Checkpoint 6 adds music ducking with audition/editable points, reusable custom export presets, advisory export readiness, and bounded input/transport consistency. All four were authorized together and the maintainer has now approved the result. Test fixtures use synthetic media, not user projects. Windows/macOS packaged verification remains release work.
+
+The following sections retain the historical August migration record; their release/branch details are not the current editing-review state.
 
 ## Merged Migration
 
