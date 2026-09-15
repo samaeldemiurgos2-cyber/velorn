@@ -1,12 +1,16 @@
 # Current AI Handoff
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## Current local editing review
 
-The active review checkout is `/home/jaime/Documents/coding_projects/general/velorn-editing-polish`, branch `codex/editing-workflow-polish`, version 0.3.33. It contains the accumulated approved editing-polish work; preserve it. The maintainer authorized a local checkpoint commit only. Do not implement this work in the separate main Velorn folder, merge, push or release without further maintainer approval.
+The active review checkout is `/home/jaime/Documents/coding_projects/general/velorn-editing-polish`, branch `codex/editing-workflow-polish`. The accumulated approved editing-polish work is committed in `8d6534a`, based on released v0.3.33 / main `fb7689b`; preserve it. On 2026-09-15 the maintainer authorized preparing v0.3.34 through the normal PR, main-merge, tag and GitHub Actions process, with the release kept **draft and unpublished** for review. Version metadata and `docs/RELEASE_NOTES_0.3.34.md` are prepared for that release. Check GitHub for current PR/build/asset status before continuing; preparation alone is not proof that builds have completed.
+
+PRs #124 and #128 were reviewed separately and are not part of this release. Do not merge them or include the experimental agent-budget work as part of this authorization. The maintainer previously authorized the CLA confirmation for our own contribution; external contributors must confirm their own agreements. Do not publish the draft without separate approval.
 
 See `docs/EDITING_POLISH_CHECKPOINTS.md` for accepted checkpoints and current verification. Checkpoint 6 adds music ducking with audition/editable points, reusable custom export presets, advisory export readiness, and bounded input/transport consistency. All four were authorized together and the maintainer has now approved the result. Test fixtures use synthetic media, not user projects. Windows/macOS packaged verification remains release work.
+
+Release preparation checks on 2026-09-15: all 944 tests in the 90-file editing/audio/playback/export regression inventory pass; Electron main/preload and changed native-helper syntax checks pass; the Linux x64 native dependency gate passes. RIFE hardening reports 44 passed and one optional real-runtime smoke test skipped because no explicit runtime/model paths were supplied. Production renderer builds pass, with the existing Vite/Browserslist/chunk warnings. These local checks do not substitute for the cross-platform packaging/signing workflow or the maintainer's draft review.
 
 The following sections retain the historical August migration record; their release/branch details are not the current editing-review state.
 
