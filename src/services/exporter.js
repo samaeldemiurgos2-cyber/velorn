@@ -1,6 +1,7 @@
 import useTimelineStore from '../stores/timelineStore'
 import useAssetsStore from '../stores/assetsStore'
 import useProjectStore from '../stores/projectStore'
+import { getCompoundRenderState, getClipPlaybackWindow, isClipInPlaybackWindow } from '../utils/compoundPlayback.mjs'
 import { hasUsableProxy } from './proxyCache'
 import { shouldUseWebCodecsForAsset, supportsTransparentExport } from '../utils/alphaMedia.mjs'
 import { getAnimatedTransform, getAnimatedAdjustmentSettings, getAnimatedTextProperties, getAnimatedShapeProperties, getAnimatedShapeMask } from '../utils/keyframes'
@@ -19,6 +20,10 @@ import { getRenderAdjustments, getRenderEffects, isClipBypassed } from '../utils
 import { drawLiveCaptionsFrame } from '../utils/captionRenderer'
 import { getAudioClipFadeGain, getAudioClipFadeValues } from '../utils/audioClipFades'
 import { getAudioClipLinearGain, normalizeAudioClipGainDb } from '../utils/audioClipGain'
+import { normalizeAudioVolumeEnvelope } from '../utils/audioVolumeEnvelope.mjs'
+import { scheduleAudioVolumeEnvelope } from '../utils/audioVolumeAutomation.mjs'
+import { normalizeAudioEq } from '../utils/audioEq.mjs'
+import { createAudioEqChain } from './audioEqChain'
 import { clampTrackVolume, hasAudioSolo, isAudioTrackAudible, trackPanToStereoPosition, trackVolumeToLinearGain } from '../utils/audioTrackAudibility'
 import { collectAudioMixClips, countExpectedAudioMixClips } from '../../electron/audioMixEligibility.mjs'
 import { getEnabledAudioInserts, hasEnabledAudioInserts } from '../utils/audioInserts'
@@ -1076,6 +1081,8 @@ const serializeAudioClipForMix = (clip) => ({
   type: 'audio',
   startTime: clip.startTime,
   duration: clip.duration,
+  playbackWindowStart: clip.playbackWindowStart,
+  playbackWindowEnd: clip.playbackWindowEnd,
   trimStart: clip.trimStart || 0,
   sourceTimeScale: clip.sourceTimeScale,
   timelineFps: clip.timelineFps,
@@ -1085,6 +1092,8 @@ const serializeAudioClipForMix = (clip) => ({
   gainDb: normalizeAudioClipGainDb(clip.gainDb),
   fadeIn: clip.fadeIn ?? 0,
   fadeOut: clip.fadeOut ?? 0,
+  volumeEnvelope: normalizeAudioVolumeEnvelope(clip.volumeEnvelope),
+  audioEq: normalizeAudioEq(clip.audioEq),
   url: clip.url || null,
 })
 
@@ -1144,7 +1153,12 @@ const formatAudioMixDropError = (skipped, includedCount, expectedCount) => {
 }
 
 const runExportTimeline = async (options = {}, onProgress = () => {}) => {
-  const timelineState = useTimelineStore.getState()
+  // Compound children are a read-only render view. Preserve their original
+  // local clocks; parent trims limit visibility rather than slicing media.
+  const timelineState = getCompoundRenderState(useTimelineStore.getState())
+  if (timelineState.compoundRenderErrors?.length > 0) {
+    throw new Error(`Cannot export: ${timelineState.compoundRenderErrors.join(' ')}`)
+  }
   const assetsState = useAssetsStore.getState()
   const projectState = useProjectStore.getState()
   // LUT grades read the in-memory library synchronously mid-frame; make sure
@@ -1213,9 +1227,17 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
   const pngSequenceBaseName = pngSequenceExport
     ? sanitizePngSequenceBaseName(filename)
     : null
-  const soloClipSet = Array.isArray(soloClipIds) && soloClipIds.length > 0
-    ? new Set(soloClipIds)
+  const expandedSoloClipIds = Array.isArray(soloClipIds) && soloClipIds.length > 0
+    ? timelineState.clips
+      .filter((clip) => soloClipIds.includes(clip.id) || soloClipIds.includes(clip.compoundParentId))
+      .map((clip) => clip.id)
     : null
+  const soloClipSet = expandedSoloClipIds
+    ? new Set(expandedSoloClipIds)
+    : null
+  if (soloClipSet?.size === 0) {
+    throw new Error('The requested export clips have no available contents. Review the selection before exporting.')
+  }
   const throwIfCancelled = () => {
     if (signal?.aborted) {
       throw new Error('Export cancelled')
@@ -1538,6 +1560,7 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
     soloClipIds: soloClipSet ? [...soloClipSet] : null,
   })
   const renderableVideoClips = videoClips.filter((clip) => renderableVideoClipIds.has(clip.id))
+  const renderableImageClips = imageClips.filter((clip) => !clip.compoundParentId || renderableVideoClipIds.has(clip.id))
 
   if (useCachedRenders) {
     for (const clip of renderableVideoClips) {
@@ -1632,7 +1655,7 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
   const projectHandle = projectState.currentProjectHandle
   const resolvedAssetUrls = new Map()
   const resolvedVideoInputPaths = new Map()
-  for (const clip of [...renderableVideoClips, ...imageClips]) {
+  for (const clip of [...renderableVideoClips, ...renderableImageClips]) {
     const overrideUrl = cachedVideoSources.get(clip.id) || opticalFlowSources.get(clip.id)?.url || null
     const asset = assetsState.getAssetById(clip.assetId)
     // Baked text/shape clips have no asset; their only source is the bake.
@@ -1927,7 +1950,7 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
     const entry = {
       cursor: null,
       settled: false,
-      clipEnd: (Number(clip.startTime) || 0) + (Number(clip.duration) || 0),
+      clipEnd: getClipPlaybackWindow(clip).end,
     }
     entry.promise = createClipFrameCursor({
       url: preparedSourceUrl || sourceUrl,
@@ -2229,6 +2252,7 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
 
     const layersStart = performance.now()
     const activeClipsUnfiltered = timelineState.getActiveClipsAtTime(time)
+      .filter(({ clip }) => !clip.compoundParentId || isClipInPlaybackWindow(clip, time))
     const activeClips = soloClipSet
       ? activeClipsUnfiltered.filter(({ clip }) => soloClipSet.has(clip.id))
       : activeClipsUnfiltered
@@ -3425,7 +3449,7 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
     if (webCodecsEnabled) {
       for (const clip of renderableVideoClips) {
         if (clipFrameCursors.has(clip.id)) continue
-        const clipStart = Number(clip.startTime) || 0
+        const { start: clipStart } = getClipPlaybackWindow(clip)
         if (clipStart > time && clipStart <= time + FRAME_CURSOR_PREFETCH_SEC) {
           getClipCursorEntry(clip)
         }
@@ -3942,9 +3966,9 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
 
             const clipStart = Number(clip.startTime) || 0
             const clipDuration = Math.max(0, Number(clip.duration) || 0)
-            const clipEnd = clipStart + clipDuration
-            const visibleStart = Math.max(rangeStart, clipStart)
-            const visibleEnd = Math.min(rangeEnd, clipEnd)
+            const playbackWindow = getClipPlaybackWindow(clip)
+            const visibleStart = Math.max(rangeStart, playbackWindow.start)
+            const visibleEnd = Math.min(rangeEnd, playbackWindow.end)
             if (visibleEnd <= visibleStart) continue
 
             const clipOffsetOnTimeline = visibleStart - clipStart
@@ -3994,8 +4018,17 @@ const runExportTimeline = async (options = {}, onProgress = () => {}) => {
               gainNode.gain.setValueAtTime(baseGain, startOffset)
             }
 
-            source.connect(gainNode)
-            gainNode.connect(getOfflineTrackBus(track).input)
+            const envelopeGainNode = offlineContext.createGain()
+            scheduleAudioVolumeEnvelope(envelopeGainNode.gain, clip, {
+              localTime: startClipTime, contextTime: startOffset,
+              endLocalTime: endClipTime,
+            })
+            source.playbackRate.value = timeScale
+            const eqChain = createAudioEqChain(offlineContext, clip.audioEq)
+            source.connect(eqChain.input)
+            eqChain.output.connect(gainNode)
+            gainNode.connect(envelopeGainNode)
+            envelopeGainNode.connect(getOfflineTrackBus(track).input)
             source.start(startOffset, sourceOffset, playDuration)
           } catch (err) {
             console.warn('Failed to decode audio clip for export:', err)

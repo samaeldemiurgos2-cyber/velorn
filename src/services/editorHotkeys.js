@@ -10,7 +10,9 @@ export const EDITOR_HOTKEY_IDS = {
   NEXT_CLIP_BOUNDARY: 'timeline.nextClipBoundary',
   PREVIOUS_MARKER: 'timeline.previousMarker',
   NEXT_MARKER: 'timeline.nextMarker',
+  PLAY_AROUND: 'timeline.playAround',
   FRAME_ALL: 'timeline.frameAll',
+  ZOOM_TO_SELECTION: 'timeline.zoomToSelection',
   ZOOM_OUT: 'timeline.zoomOut',
   ZOOM_IN: 'timeline.zoomIn',
   MATCH_FRAME: 'timeline.matchFrame',
@@ -113,10 +115,22 @@ export const EDITOR_HOTKEY_DEFINITIONS = [
     defaultBinding: 'Shift+ArrowDown',
   },
   {
+    id: EDITOR_HOTKEY_IDS.PLAY_AROUND,
+    label: 'Play around edit',
+    description: 'Preview 2 seconds before and after the playhead, then return',
+    defaultBinding: 'Shift+K',
+  },
+  {
     id: EDITOR_HOTKEY_IDS.FRAME_ALL,
     label: 'Frame all timeline content',
     description: 'Timeline navigation',
     defaultBinding: '1',
+  },
+  {
+    id: EDITOR_HOTKEY_IDS.ZOOM_TO_SELECTION,
+    label: 'Zoom to selection / restore previous view',
+    description: 'Timeline navigation',
+    defaultBinding: 'Z',
   },
   {
     id: EDITOR_HOTKEY_IDS.ZOOM_OUT,

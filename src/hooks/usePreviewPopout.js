@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { attachPreviewPopoutKeyboard } from '../utils/previewPopoutKeyboard.mjs'
+import { hasVisibleKeyboardModal } from '../utils/transportKeyboardGuards.mjs'
 
 // Detachable preview window ("clean feed"). Opens a named same-origin child
 // window via window.open — Electron's window-open handler (main.js) allows
@@ -44,6 +46,7 @@ export default function usePreviewPopout({ getSourceElement, onTogglePlay }) {
     const child = window.open('about:blank', POPOUT_NAME, features)
     if (!child) return
     popoutRef.current = child
+    child.__velornPreviewCleanup?.()
 
     // Re-adopting a still-open window (e.g. after HMR) must not stack blit
     // loops: each adoption bumps the token and stale loops see the mismatch.
@@ -86,13 +89,12 @@ export default function usePreviewPopout({ getSourceElement, onTogglePlay }) {
       } catch { /* fullscreen denied — ignore */ }
     }
     canvas.addEventListener('dblclick', toggleChildFullscreen)
-    doc.addEventListener('keydown', (event) => {
-      if (event.code === 'Space') {
-        event.preventDefault()
-        onTogglePlayRef.current?.()
-      } else if (event.key === 'f' || event.key === 'F') {
-        toggleChildFullscreen()
-      }
+    const stopKeyboard = attachPreviewPopoutKeyboard({
+      windowTarget: child, documentTarget: doc,
+      canHandle: () => !child.closed && popoutRef.current === child && child.__velornBlitToken === blitToken
+        && !hasVisibleKeyboardModal(),
+      onTogglePlay: () => onTogglePlayRef.current?.(),
+      onToggleFullscreen: toggleChildFullscreen,
     })
 
     const saveBounds = () => {
@@ -102,13 +104,22 @@ export default function usePreviewPopout({ getSourceElement, onTogglePlay }) {
         }))
       } catch { /* storage full — ignore */ }
     }
-    child.addEventListener('beforeunload', () => {
+    const handleChildUnload = () => {
       saveBounds()
+      cleanup()
       if (popoutRef.current === child) {
         popoutRef.current = null
         setIsPoppedOut(false)
       }
-    })
+    }
+    const cleanup = () => {
+      stopKeyboard()
+      canvas.removeEventListener('dblclick', toggleChildFullscreen)
+      child.removeEventListener('beforeunload', handleChildUnload)
+      if (child.__velornPreviewCleanup === cleanup) delete child.__velornPreviewCleanup
+    }
+    child.__velornPreviewCleanup = cleanup
+    child.addEventListener('beforeunload', handleChildUnload)
 
     setIsPoppedOut(true)
   }, [])
@@ -128,7 +139,7 @@ export default function usePreviewPopout({ getSourceElement, onTogglePlay }) {
       }
     }
     window.addEventListener('beforeunload', closeChild)
-    return () => window.removeEventListener('beforeunload', closeChild)
+    return () => { window.removeEventListener('beforeunload', closeChild); closeChild() }
   }, [])
 
   return { isPoppedOut, open, close, toggle }

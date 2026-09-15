@@ -12,6 +12,7 @@ import { DEFAULT_SHAPE_MASK, DEFAULT_SPLINE_POINTS, SHAPE_MASK_TYPES, normalizeS
 import { clampTrackPan, clampTrackVolume } from '../utils/audioTrackAudibility'
 import { normalizeAudioInserts } from '../utils/audioInserts'
 import { buildAudioClipSplitState } from '../utils/audioClipSplit'
+import { getProjectAssetReferences } from '../utils/projectAssetReferences.mjs'
 import {
   MUSIC_KEY_SCALES,
   MUSIC_TIME_SIGNATURES,
@@ -4712,49 +4713,8 @@ async function handleMoveAssetsToFolder(payload = {}) {
   }
 }
 
-function collectMcpAssetIds(value, usedAssetIds, depth = 0) {
-  if (!value || depth > 5) return
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectMcpAssetIds(item, usedAssetIds, depth + 1))
-    return
-  }
-  if (typeof value !== 'object') return
-
-  Object.entries(value).forEach(([key, entryValue]) => {
-    const normalizedKey = String(key || '').toLowerCase()
-    if ((normalizedKey === 'assetid' || normalizedKey.endsWith('assetid')) && typeof entryValue === 'string' && entryValue.trim()) {
-      usedAssetIds.add(entryValue.trim())
-      return
-    }
-    if (entryValue && typeof entryValue === 'object') {
-      collectMcpAssetIds(entryValue, usedAssetIds, depth + 1)
-    }
-  })
-}
-
 function getUsedAssetIdsAcrossProject() {
-  const projectState = useProjectStore.getState()
-  const timelineState = useTimelineStore.getState()
-  const project = projectState.currentProject || null
-  const currentTimelineId = projectState.currentTimelineId || project?.currentTimelineId || null
-  const usedAssetIds = new Set()
-
-  for (const timeline of project?.timelines || []) {
-    const clips = timeline?.id === currentTimelineId
-      ? (timelineState.clips || [])
-      : (timeline?.clips || [])
-    for (const clip of clips || []) {
-      collectMcpAssetIds(clip, usedAssetIds)
-    }
-  }
-
-  if (!project?.timelines?.length) {
-    for (const clip of timelineState.clips || []) {
-      collectMcpAssetIds(clip, usedAssetIds)
-    }
-  }
-
-  return usedAssetIds
+  return getProjectAssetReferences(useProjectStore.getState(), useTimelineStore.getState())
 }
 
 function buildMoveUnusedAssetsToFolderPlan(payload = {}) {

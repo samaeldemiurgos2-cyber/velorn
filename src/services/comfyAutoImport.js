@@ -1048,6 +1048,9 @@ export function stopComfyAutoImport() {
  */
 export async function unstitchSequenceAsset(asset) {
   if (!asset || !asset.sequenceSource) return { success: false, error: 'Asset is not a stitched sequence.' }
+  const { checkCompoundAssetDeletion } = await import('./compoundAssetProtection')
+  const guard = checkCompoundAssetDeletion([asset.id])
+  if (!guard.ok) return { success: false, blockedByCompound: true, error: guard.reason }
   const projectDir = currentProjectHandle()
   if (!projectDir) return { success: false, error: 'No active project.' }
   const { sequenceSource } = asset
@@ -1077,7 +1080,10 @@ export async function unstitchSequenceAsset(asset) {
   // Remove the stitched video asset from the store.
   try {
     const { removeAsset } = useAssetsStore.getState()
-    if (typeof removeAsset === 'function') removeAsset(asset.id)
+    const latestGuard = checkCompoundAssetDeletion([asset.id])
+    if (!latestGuard.ok) return { success: false, blockedByCompound: true, error: latestGuard.reason, importedCount: imported.length }
+    const result = typeof removeAsset === 'function' ? removeAsset(asset.id) : null
+    if (result?.ok === false) return { success: false, blockedByCompound: true, error: result.reason, importedCount: imported.length }
   } catch (err) {
     console.warn('[comfyAutoImport] could not remove stitched asset from store:', err)
   }

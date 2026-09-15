@@ -85,6 +85,13 @@ const createDefaultTimeline = (name = 'Timeline 1', id = null, settings = null) 
 
 const MAX_PROJECT_HISTORY_SIZE = 25
 
+// Focus is a view of an embedded document, never a project timeline. Commit
+// its one parent checkpoint before any operation that changes that identity.
+const finishCompoundFocus = () => {
+  const timeline = useTimelineStore.getState()
+  return !timeline.compoundEditContext || timeline.closeCompound().ok
+}
+
 const cloneProjectHistoryValue = (value) => JSON.parse(JSON.stringify(value))
 
 const createTimelineStructureSnapshot = (state) => {
@@ -398,6 +405,7 @@ export const useProjectStore = create(
        * @param {number} options.fps - Frame rate
        */
       createProject: async ({ name, width, height, fps }) => {
+        if (!finishCompoundFocus()) return null
         const state = get()
         
         if (!state.defaultProjectsHandle) {
@@ -482,6 +490,7 @@ export const useProjectStore = create(
        * @param {FileSystemDirectoryHandle|string} projectHandleOrPath - The project directory handle or path
        */
       openProject: async (projectHandleOrPath) => {
+        if (!finishCompoundFocus()) return null
         set({ isLoading: true, error: null, lastFailedProjectHandle: null, lastFailedProjectName: null })
         
         try {
@@ -697,6 +706,7 @@ export const useProjectStore = create(
       },
 
       saveTimelineStructureToHistory: () => {
+        if (useTimelineStore.getState().compoundEditContext) return false
         const state = get()
         const snapshot = createTimelineStructureSnapshot(state)
         if (!snapshot) return false
@@ -721,6 +731,7 @@ export const useProjectStore = create(
       },
 
       undoTimelineStructureChange: () => {
+        if (useTimelineStore.getState().compoundEditContext) return false
         const state = get()
         if (!state.currentProject || state.projectHistory.length === 0) return false
 
@@ -759,6 +770,7 @@ export const useProjectStore = create(
       },
 
       redoTimelineStructureChange: () => {
+        if (useTimelineStore.getState().compoundEditContext) return false
         const state = get()
         if (!state.currentProject || state.projectFuture.length === 0) return false
 
@@ -796,8 +808,8 @@ export const useProjectStore = create(
         return true
       },
 
-      canUndoTimelineStructureChange: () => get().projectHistory.length > 0,
-      canRedoTimelineStructureChange: () => get().projectFuture.length > 0,
+      canUndoTimelineStructureChange: () => !useTimelineStore.getState().compoundEditContext && get().projectHistory.length > 0,
+      canRedoTimelineStructureChange: () => !useTimelineStore.getState().compoundEditContext && get().projectFuture.length > 0,
       clearTimelineStructureHistory: () => set({
         projectHistory: [],
         projectFuture: [],
@@ -808,6 +820,7 @@ export const useProjectStore = create(
        * Close the current project
        */
       closeProject: async () => {
+        if (!finishCompoundFocus()) return false
         // Save before closing
         await get().saveProject()
         
@@ -884,8 +897,12 @@ export const useProjectStore = create(
        * @param {string} timelineId - ID of the timeline to switch to
        */
       switchTimeline: async (timelineId) => {
+        if (!finishCompoundFocus()) return false
         const state = get()
         if (!state.currentProject?.timelines) return false
+        // The live store may contain an edited child just committed by Back.
+        // Selecting its current timeline must not reload the older project copy.
+        if (timelineId === state.currentTimelineId) return true
         
         // Find the target timeline
         const targetTimeline = state.currentProject.timelines.find(t => t.id === timelineId)
@@ -928,6 +945,7 @@ export const useProjectStore = create(
        * @param {number} options.durationSeconds - Optional starting timeline duration in seconds
        */
       createTimeline: (options = null) => {
+        if (!finishCompoundFocus()) return null
         const state = get()
         if (!state.currentProject) return null
         get().saveTimelineStructureToHistory()
@@ -965,6 +983,7 @@ export const useProjectStore = create(
        * @param {string} timelineId - ID of the timeline to duplicate
        */
       duplicateTimeline: (timelineId) => {
+        if (!finishCompoundFocus()) return null
         const state = get()
         if (!state.currentProject?.timelines) return null
         get().saveTimelineStructureToHistory()
@@ -1014,6 +1033,7 @@ export const useProjectStore = create(
        * @param {string} newName - New name for the timeline
        */
       renameTimeline: (timelineId, newName) => {
+        if (!finishCompoundFocus()) return false
         const state = get()
         if (!state.currentProject?.timelines || !newName.trim()) return false
         get().saveTimelineStructureToHistory()
@@ -1038,6 +1058,7 @@ export const useProjectStore = create(
        * @param {string|null} color - Hex color or null
        */
       setTimelineColor: (timelineId, color) => {
+        if (!finishCompoundFocus()) return false
         const state = get()
         if (!state.currentProject?.timelines) return false
         const existingTimeline = state.currentProject.timelines.find((timeline) => timeline.id === timelineId)
@@ -1066,6 +1087,7 @@ export const useProjectStore = create(
        * @param {string|null} folderId - Destination folder ID (null = root)
        */
       moveTimelineToFolder: (timelineId, folderId = null) => {
+        if (!finishCompoundFocus()) return false
         const state = get()
         if (!state.currentProject?.timelines) return false
         const normalizedFolderId = folderId || null
@@ -1094,6 +1116,7 @@ export const useProjectStore = create(
        * @param {string} timelineId - ID of the timeline to delete
        */
       deleteTimeline: (timelineId) => {
+        if (!finishCompoundFocus()) return false
         const state = get()
         if (!state.currentProject?.timelines) return false
         
@@ -1218,12 +1241,21 @@ export const useProjectStore = create(
        * Update project settings
        */
       updateProjectSettings: (settings) => {
+        const state = get()
+        const timeline = useTimelineStore.getState()
+        const hasCompound = timeline.compoundEditContext || timeline.clips.some(clip => clip.type === 'compound')
+          || state.currentProject?.timelines?.some(item => item.clips?.some(clip => clip.type === 'compound'))
+        if (hasCompound && ['width', 'height', 'fps'].some(key => Object.hasOwn(settings || {}, key)
+          && settings[key] !== state.currentProject?.settings?.[key])) {
+          return { ok: false, reason: 'Sequence dimensions and frame rate cannot change while the project contains compounds.' }
+        }
         set((state) => ({
           currentProject: state.currentProject ? {
             ...state.currentProject,
             settings: { ...state.currentProject.settings, ...settings },
           } : null,
         }))
+        return { ok: true }
       },
 
       getFlowAiData: () => {

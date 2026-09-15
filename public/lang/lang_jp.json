@@ -178,6 +178,185 @@
     }
   },
   "export": {
+    "readiness": {
+      "checking": "確認中…",
+      "stale": "再確認が必要",
+      "warningCount": "警告 {{count}}件",
+      "optional": "任意",
+      "title": "書き出し前の確認",
+      "help": "この範囲のソースの利用可否、Optical Flowキャッシュの情報、映像や音声の空白の可能性を確認します。警告は参考情報です。意図した黒画面や無音は許容されます。",
+      "refresh": "再確認",
+      "check": "この範囲を確認",
+      "cancel": "確認をキャンセル",
+      "staleHelp": "タイムライン、ソースの登録情報、または書き出し設定が変更されました。現在の範囲を再確認してください。",
+      "failed": "確認を完了できませんでした。もう一度お試しください。メディアやプロジェクトのデータは変更されていません。",
+      "noWarnings": "今回の確認では警告は見つかりませんでした。",
+      "warnings": "書き出し前の確認で見つかった警告",
+      "inspect": "位置を確認",
+      "limitations": "ファイルの利用可否とタイムラインのみを確認します。デコードやレンダリングのテストではありません。ソースの変更とキャッシュの識別情報は書き出し時に検証されます。ファイルを移動した場合は再確認してください。書き出し時の安全確認も引き続き行われます。",
+      "warning": {
+        "invalid-range": {
+          "title": "書き出し範囲を選択してください",
+          "detail": "選択した範囲の長さがありません。"
+        },
+        "missing-asset": {
+          "title": "メディアの登録情報がありません",
+          "detail": "「{{name}}」は、このプロジェクトに存在しないメディアを参照しています。"
+        },
+        "missing-location": {
+          "title": "メディアの場所がありません",
+          "detail": "「{{name}}」には、ファイルの場所もメディアURLも登録されていません。"
+        },
+        "media-unverified": {
+          "title": "一部のメディアを確認できませんでした",
+          "detail": "「{{name}}」のファイルの利用可否を確認できませんでした。ブラウザー内やリモートのメディアは書き出し時の検証が必要です。"
+        },
+        "missing-source": {
+          "title": "ソースファイルを利用できません",
+          "detail": "「{{name}}」の登録されたソースが見つからないか、アクセスできません。必要に応じてエディターで再リンクしてください。"
+        },
+        "missing-proxy-source": {
+          "title": "元のソースファイルを利用できません",
+          "detail": "「{{name}}」の元ファイルが見つからないか、アクセスできません。確認用プロキシは利用できる可能性がありますが、最終納品前に元ファイルを確認してください。"
+        },
+        "missing-mask": {
+          "title": "マスクのメディアを利用できません",
+          "detail": "「{{name}}」で使用するマスクファイルが見つからないか、アクセスできません。"
+        },
+        "optical-unready": {
+          "title": "Optical Flowの確認が必要です",
+          "detail": "「{{name}}」のキャッシュを利用できないか、現在の編集範囲をカバーしていません。インスペクターでOptical Flowを確認してください。"
+        },
+        "optical-path": {
+          "title": "Optical Flowの保存場所が無効です",
+          "detail": "「{{name}}」のキャッシュには、対応するプロジェクト相対の保存場所が設定されていません。インスペクターで再作成してください。"
+        },
+        "optical-unsaved": {
+          "title": "Optical Flowにはプロジェクトの保存が必要です",
+          "detail": "プロジェクトを保存し、インスペクターで「{{name}}」のキャッシュを確認してください。"
+        },
+        "optical-signature": {
+          "title": "Optical Flowのソースが未確認です",
+          "detail": "「{{name}}」のキャッシュにはソースの識別情報がありません。書き出しには、現在のソースから作成された有効なキャッシュが必要です。"
+        },
+        "missing-optical": {
+          "title": "Optical Flowのファイルを利用できません",
+          "detail": "「{{name}}」のキャッシュファイルが見つからないか、アクセスできません。インスペクターで再作成してください。"
+        },
+        "file-unverified": {
+          "title": "ファイルの利用可否を確認できませんでした",
+          "detail": "「{{name}}」に登録されたファイルを確認できませんでした。メディアは変更されていません。"
+        },
+        "picture-gap": {
+          "title": "映像に空白がある可能性があります",
+          "detail": "この区間をカバーする有効な映像クリップがありません。黒画面や透明部分は意図したものかもしれません。"
+        },
+        "picture-tail": {
+          "title": "末尾が空白になる可能性があります",
+          "detail": "書き出し範囲の末尾をカバーする有効な映像クリップがありません。黒画面や透明部分は意図したものかもしれません。"
+        },
+        "no-audio": {
+          "title": "この範囲に有効な音声クリップがありません",
+          "detail": "音声の書き出しが指定されていますが、有効で音声を出力する音声クリップが見つかりませんでした。無音は意図したものかもしれません。"
+        },
+        "master-muted": {
+          "title": "マスター音声がミュートされています",
+          "detail": "マスター音量がゼロです。音声の書き出しが指定されていますが、出力は無音になります。"
+        },
+        "compound-unverified": {
+          "title": "コンパウンドを確認できませんでした",
+          "detail": "「{{name}}」には、対応していないコンパウンドの内容またはタイミング設定があります。書き出す前にエディターで確認してください。"
+        }
+      }
+    },
+    "overview": {
+      "regionLabel": "書き出しタイムラインの概要",
+      "title": "タイムラインの概要",
+      "readOnly": "読み取り専用",
+      "fullTimeline": "タイムライン全体",
+      "inOut": "イン／アウト",
+      "audioTrack": "音声 {{number}}",
+      "videoTrack": "映像 {{number}}",
+      "audioClip": "音声クリップ",
+      "clip": "クリップ",
+      "timecodeHint": "タイムコードはノンドロップフレームで表示します。",
+      "frameRate": "{{fps}} fps",
+      "muted": "ミュート",
+      "hidden": "非表示",
+      "excludedBySolo": "ソロ設定により除外",
+      "inactive": "無効",
+      "empty": "このタイムラインにはクリップがありません",
+      "startBoundary": "書き出し範囲の最初のフレーム",
+      "endBoundary": "アウト点のフレーム自体は書き出されません。",
+      "scrubLabel": "書き出しプレビューをスクラブ",
+      "scrubValue": "{{timecode}}、毎秒{{fps}}フレーム、ノンドロップフレーム"
+    },
+    "deliveryPresets": {
+      "title": "用途別プリセット",
+      "more": "その他のプリセット",
+      "customHelp": "下の設定を調整するか、プリセットを選んで開始してください。",
+      "hdLimit": "YouTube HD上限",
+      "uhdLimit": "YouTube 4K上限",
+      "sizeHelp": "タイムラインの縦横比を維持し、HDまたは4Kの範囲に収めます。小さいタイムラインは拡大しません。",
+      "items": {
+        "youtube-1080p": {
+          "label": "YouTube 1080p",
+          "detail": "最大HD · MP4",
+          "summary": "HDを上限とするH.264アップロード用設定。縦横比とプロジェクトのFPSを維持し、拡大しません。"
+        },
+        "youtube-4k": {
+          "label": "YouTube 4K",
+          "detail": "最大4K · MP4",
+          "summary": "4Kを上限とするH.264アップロード用設定。縦横比とプロジェクトのFPSを維持し、拡大しません。"
+        },
+        "h264-master": {
+          "label": "H.264マスター",
+          "detail": "高品質MP4",
+          "summary": "元のメディアを使用し、プロジェクトの解像度でCRF 16の高品質H.264を書き出します。"
+        },
+        "prores-master": {
+          "label": "ProResマスター",
+          "detail": "ProRes HQ · MOV",
+          "summary": "プロジェクトの解像度で、追加編集に適した大容量のProRes HQ MOVを書き出します。"
+        },
+        "review-copy": {
+          "label": "確認用コピー",
+          "detail": "小容量ですばやく共有",
+          "summary": "解像度を半分にした確認用MP4。利用可能なプロキシでレンダーを高速化します。"
+        }
+      }
+    },
+    "workspace": {
+      "preview": "タイムラインのプレビュー",
+      "previewHelp": "タイムライン設定で確認できます。書き出しの解像度、エンコード、音声設定はレンダリング時に適用されます。",
+      "hideQueue": "キューを隠す",
+      "resizeSettings": "書き出し設定パネルの幅を変更",
+      "resizeQueue": "書き出しキューパネルの幅を変更",
+      "resizePanelHelp": "ドラッグで幅を変更します。ダブルクリックまたは Enter でリセット。矢印キーで調整し、Shift で大きく変更します。",
+      "showQueue": "キューを表示",
+      "customPreset": "カスタム設定",
+      "width": "幅",
+      "height": "高さ",
+      "audioSettings": "音声設定",
+      "advancedEncoding": "エンコードの詳細設定",
+      "encodingPerformance": "エンコードとパフォーマンス",
+      "handoff": "別の編集ソフトに送る",
+      "duration": "長さ",
+      "missingMarks": "この範囲を使うには、エディターでイン点とアウト点の両方を設定してください。",
+      "missingMarksFallback": "イン点またはアウト点が未設定のため、タイムライン全体を書き出します。",
+      "collapsedMarks": "イン点とアウト点が同じ位置です。エディターで別々の位置に設定するか、タイムライン全体を選択してください。",
+      "queueHelp": "開始時のタイムラインとイン点／アウト点を使用します。保存先は書き出し時に選択します。",
+      "pauseAfterCurrent": "現在の処理後に一時停止",
+      "clearQueue": "キューを空にする",
+      "exportNow": "今すぐ書き出す",
+      "status": {
+        "queued": "待機中",
+        "rendering": "レンダリング中",
+        "completed": "完了",
+        "failed": "失敗",
+        "stopped": "停止"
+      }
+    },
     "title": "書き出し",
     "headerReady": "キューと設定の準備完了",
     "ready": "書き出し可能",
@@ -723,6 +902,7 @@
       },
       "actions": {
         "timeline": {
+          "playAround": "編集点の前後を再生",
           "selectToEnd": "再生ヘッドから末尾までのクリップを選択",
           "selectFromStart": "先頭から再生ヘッドまでのクリップを選択",
           "splitActive": "再生ヘッド位置で現在のトラックを分割",
@@ -738,6 +918,7 @@
           "previousMarker": "前のマーカーへ移動",
           "nextMarker": "次のマーカーへ移動",
           "frameAll": "タイムライン全体を表示",
+          "zoomToSelection": "選択範囲を表示 / 前の表示に戻す",
           "zoomOut": "タイムラインを縮小",
           "zoomIn": "タイムラインを拡大",
           "openMoveBy": "移動量ダイアログを開く",
@@ -1146,6 +1327,7 @@
       "toolTrim": "クリップの先頭または末尾を端からトリミングします。",
       "toolRazor": "クリップをクリックし、カーソル位置で分割します。",
       "toolSlip": "映像／音声クリップ内をドラッグし、位置を変えずにソースのタイミングをスリップします。",
+      "toolSlide": "隣接する2つのクリップの間でスライドします。素材と長さは変えずに、両隣の端を一緒にトリムします。",
       "snapping": "スナップ {{state}}（{{shortcut}}で切り替え）",
       "ripple": "リップル編集 {{state}}（{{shortcut}}で切り替え）— クリップ移動時に後続クリップも移動します",
       "generateMusic": "ACE-Stepで音楽を生成 — イン／アウト範囲から長さを自動入力します",
@@ -1155,6 +1337,9 @@
       "durationBy": "選択したクリップの長さを指定量だけ変更{{shortcut}}",
       "moreTools": "その他のツール",
       "frameAll": "全体表示 — タイムラインまたは全クリップを表示範囲に合わせる",
+      "zoomToSelection": "選択範囲を表示",
+      "restoreSelectionView": "前の表示に戻す",
+      "zoomToSelectionHelp": "選択したクリップを表示範囲に合わせます。もう一度実行すると、以前のズームとスクロール位置に戻ります",
       "trackHeightCompact": "コンパクト — 画面に多くのトラックを表示",
       "trackHeightNormal": "標準のトラック高さ",
       "trackHeightTall": "高く表示 — 波形とキーフレーム用の領域を確保",
